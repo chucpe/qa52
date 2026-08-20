@@ -1,5 +1,7 @@
 package lesson2_2;
 
+import org.w3c.dom.ls.LSOutput;
+
 import java.util.Arrays;
 
 public class Main {
@@ -77,13 +79,13 @@ public class Main {
     public static void checkSumSign() {
         int a = 5;
         int b = -2;
-        int sum = a + b;
-        if (sum >= 0) {
+        if (a + b >= 0) {
             System.out.println("Сумма положительная");
         } else {
             System.out.println("Сумма отрицательная");
         }
     }
+
 
     // 3. Метод printColor
     public static void printColor() {
@@ -110,8 +112,7 @@ public class Main {
 
     // 5. Метод проверки суммы в диапазоне 10-20
     public static boolean checkSumRange(int a, int b) {
-        int sum = a + b;
-        return sum >= 10 && sum <= 20;
+        return a + b >= 10 && a + b <= 20;
     }
 
     // 6. Метод печати положительного/отрицательного (0 считаем положительным)
