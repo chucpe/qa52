@@ -53,3 +53,4 @@ class NumberComparatorTest {
         assertEquals(expected, NumberComparator.isEqual(a, b));
     }
 }
+
