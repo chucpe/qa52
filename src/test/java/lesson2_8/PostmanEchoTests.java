@@ -22,7 +22,6 @@ public class PostmanEchoTests {
     @BeforeAll
     public static void setup() {
         RestAssured.baseURI = BASE_URL;
-        // ИСПРАВЛЕНО: правильное название метода
         RestAssured.enableLoggingOfRequestAndResponseIfValidationFails();
     }
 
@@ -242,8 +241,6 @@ public class PostmanEchoTests {
                 () -> assertNotNull(actualResponse.getArgs(), "Args не должны быть null"),
                 () -> assertEquals("789", actualResponse.getArgs().get("id"), "ID не совпадает"),
                 () -> assertEquals("true", actualResponse.getArgs().get("force"), "Force не совпадает"),
-
-                // Проверяем, что data содержит вложенные объекты (files, form, headers)
                 () -> assertNotNull(actualResponse.getData(), "Data не должен быть null"),
                 () -> assertNotNull(actualResponse.getFiles(), "Files не должен быть null")
         );
