@@ -4,6 +4,7 @@ import com.codeborne.selenide.Condition;
 import com.codeborne.selenide.ElementsCollection;
 import com.codeborne.selenide.SelenideElement;
 import com.codeborne.selenide.WebDriverRunner;
+import io.qameta.allure.Step;
 
 import static com.codeborne.selenide.CollectionCondition.sizeGreaterThan;
 import static com.codeborne.selenide.Condition.attribute;
@@ -16,12 +17,12 @@ public class HomePage {
     // === ЛОКАТОРЫ ===
     private final SelenideElement blockTitle = $("div.pay__wrapper h2");
     private final SelenideElement selectHeader = $(".select__header");
-    private final SelenideElement connectionForm = $("#pay-connection");
-    private final SelenideElement internetForm = $("#pay-internet");
-    private final SelenideElement instalmentForm = $("#pay-instalment");
-    private final SelenideElement arrearsForm = $("#pay-arrears");
+    private final ElementsCollection paymentLogos = $$("div.pay__partners img");
+    private final SelenideElement moreDetailsLink = $("div.pay__wrapper a[href*='poryadok-oplaty']");
+    private final SelenideElement cookieBanner = $(".cookie.show");
+    private final SelenideElement cookieAcceptButton = $(".cookie__ok");
 
-    // Поля для ввода (динамические, зависят от выбранной формы)
+    // Динамические поля
     private SelenideElement getPhoneInput() {
         return $(".pay-form.opened .phone, .pay-form.opened input[placeholder*='Номер']");
     }
@@ -34,31 +35,25 @@ public class HomePage {
         return $(".pay-form.opened .email, .pay-form.opened input[placeholder*='E-mail']");
     }
 
-    // Кнопка "Продолжить" для текущей формы
     private SelenideElement getContinueButton() {
         return $(".pay-form.opened .button__default");
     }
 
-    // Логотипы и ссылки
-    private final ElementsCollection paymentLogos = $$("div.pay__partners img");
-    private final SelenideElement moreDetailsLink = $("div.pay__wrapper a[href*='poryadok-oplaty']");
+    // === МЕТОДЫ С ALLURE ШАГАМИ ===
 
-    // Cookie
-    private final SelenideElement cookieBanner = $(".cookie.show");
-    private final SelenideElement cookieAcceptButton = $(".cookie__ok");
-
-    // === МЕТОДЫ ===
-
+    @Step("Открыть главную страницу mts.by")
     public HomePage openPage() {
         open("https://www.mts.by");
+        sleep(1000);
         return this;
     }
 
+    @Step("Закрыть cookie-баннер")
     private HomePage closeCookieBanner() {
         if (cookieBanner.isDisplayed()) {
             try {
                 cookieAcceptButton.click();
-                Thread.sleep(1000);
+                sleep(500);
             } catch (Exception e) {
                 // ignore
             }
@@ -66,18 +61,21 @@ public class HomePage {
         return this;
     }
 
+    @Step("Проверить название блока 'Онлайн пополнение без комиссии'")
     public HomePage verifyBlockTitle() {
         blockTitle.shouldBe(visible);
         blockTitle.shouldHave(text("Онлайн пополнение"));
         return this;
     }
 
+    @Step("Проверить наличие логотипов платёжных систем")
     public HomePage verifyPaymentLogosExist() {
         paymentLogos.shouldHave(sizeGreaterThan(0));
         paymentLogos.forEach(logo -> logo.shouldBe(visible));
         return this;
     }
 
+    @Step("Проверить работу ссылки «Подробнее о сервисе»")
     public HomePage clickMoreDetailsAndVerify() {
         moreDetailsLink.shouldBe(visible).click();
         String currentUrl = WebDriverRunner.url();
@@ -85,44 +83,46 @@ public class HomePage {
         return this;
     }
 
+    @Step("Выбрать вариант оплаты: {optionName}")
     public HomePage selectPaymentOption(String optionName) {
         closeCookieBanner();
 
+        // Закрываем список, если он уже открыт
+        SelenideElement dropdownList = $(".select__list");
+        if (dropdownList.exists() && dropdownList.isDisplayed()) {
+            selectHeader.click();
+            sleep(300);
+        }
+
+        // Открываем список
         selectHeader.shouldBe(visible).click();
+        sleep(300);
 
+        // Находим нужную опцию
         SelenideElement option = $x(String.format("//li[contains(@class, 'select__item')]//p[text()='%s']", optionName));
-        option.shouldBe(visible).click();
+        option.shouldBe(visible);
 
-        // Ждем, пока откроется нужная форма
-        try {
-            Thread.sleep(1000);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
+        // Прокручиваем к элементу и кликаем через JavaScript (обходит перекрытие)
+        executeJavaScript("arguments[0].scrollIntoView({block: 'center'});", option);
+        sleep(200);
+        executeJavaScript("arguments[0].click();", option);
+
+        sleep(500);
+        return this;
+    }
+
+    @Step("Проверить плейсхолдеры: телефон='{phonePlaceholder}', сумма='{amountPlaceholder}', email='{emailPlaceholder}'")
+    public HomePage verifyPlaceholders(String phonePlaceholder, String amountPlaceholder, String emailPlaceholder) {
+        sleep(500);
+
+        getPhoneInput().shouldHave(attribute("placeholder", phonePlaceholder));
+        getAmountInput().shouldHave(attribute("placeholder", amountPlaceholder));
+        getEmailInput().shouldHave(attribute("placeholder", emailPlaceholder));
 
         return this;
     }
 
-    public HomePage verifyPlaceholders(String expectedPhonePlaceholder, String expectedAmountPlaceholder, String expectedEmailPlaceholder) {
-        // Ждем, пока форма загрузится
-        try {
-            Thread.sleep(500);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        // Проверяем плейсхолдеры у активной формы
-        SelenideElement phoneInput = getPhoneInput();
-        SelenideElement amountInput = getAmountInput();
-        SelenideElement emailInput = getEmailInput();
-
-        phoneInput.shouldHave(attribute("placeholder", expectedPhonePlaceholder));
-        amountInput.shouldHave(attribute("placeholder", expectedAmountPlaceholder));
-        emailInput.shouldHave(attribute("placeholder", expectedEmailPlaceholder));
-
-        return this;
-    }
-
+    @Step("Заполнить номер телефона: {phone}")
     public HomePage fillPhoneNumber(String phone) {
         SelenideElement phoneInput = getPhoneInput();
         phoneInput.shouldBe(visible).clear();
@@ -130,6 +130,7 @@ public class HomePage {
         return this;
     }
 
+    @Step("Заполнить сумму: {amount}")
     public HomePage fillAmount(String amount) {
         SelenideElement amountInput = getAmountInput();
         amountInput.shouldBe(visible).clear();
@@ -137,6 +138,7 @@ public class HomePage {
         return this;
     }
 
+    @Step("Заполнить email: {email}")
     public HomePage fillEmail(String email) {
         SelenideElement emailInput = getEmailInput();
         emailInput.shouldBe(visible).clear();
@@ -144,6 +146,7 @@ public class HomePage {
         return this;
     }
 
+    @Step("Нажать кнопку «Продолжить»")
     public PaymentFormPage clickContinue() {
         SelenideElement continueButton = getContinueButton();
         continueButton.shouldBe(visible).click();

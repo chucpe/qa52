@@ -1,5 +1,12 @@
 package tests;
 
+import io.qameta.allure.Description;
+import io.qameta.allure.Epic;
+import io.qameta.allure.Feature;
+import io.qameta.allure.Severity;
+import io.qameta.allure.SeverityLevel;
+import io.qameta.allure.Story;
+import utils.Title;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -7,6 +14,8 @@ import pages.HomePage;
 import pages.PaymentFormPage;
 import utils.Config;
 
+@Epic("Тестирование сайта mts.by")
+@Feature("Онлайн пополнение без комиссии")
 public class MtsOnlinePaymentTest {
 
     private HomePage homePage;
@@ -25,8 +34,14 @@ public class MtsOnlinePaymentTest {
         }
     }
 
+    // ==================== ОСНОВНЫЕ ТЕСТЫ ====================
+
     @Test
     @DisplayName("Проверка блока 'Онлайн пополнение без комиссии'")
+    @Title("Проверка блока онлайн пополнения")
+    @Description("Полная проверка блока: заголовок, логотипы, ссылка, плейсхолдеры, заполнение полей и переход к оплате")
+    @Severity(SeverityLevel.CRITICAL)
+    @Story("Основной сценарий оплаты")
     void testOnlinePaymentBlock() {
         // 1. Проверяем название блока
         homePage.verifyBlockTitle();
@@ -52,10 +67,10 @@ public class MtsOnlinePaymentTest {
                 .fillAmount("10")
                 .fillEmail("test@test.com");
 
-        // 6. Нажимаем "Продолжить" (проверяем, что кнопка работает)
+        // 6. Нажимаем "Продолжить"
         paymentFormPage = homePage.clickContinue();
 
-        // 7. Проверяем, что форма оплаты открылась (с гибкой проверкой)
+        // 7. Проверяем форму оплаты
         paymentFormPage.verifyPaymentFormOpened();
     }
 
@@ -63,6 +78,10 @@ public class MtsOnlinePaymentTest {
 
     @Test
     @DisplayName("Проверка надписей в полях для 'Услуги связи'")
+    @Title("Плейсхолдеры для Услуги связи")
+    @Description("Проверка плейсхолдеров в полях формы для услуги 'Услуги связи'")
+    @Severity(SeverityLevel.NORMAL)
+    @Story("Проверка плейсхолдеров")
     void testServicesPlaceholders() {
         homePage
                 .selectPaymentOption("Услуги связи")
@@ -75,6 +94,10 @@ public class MtsOnlinePaymentTest {
 
     @Test
     @DisplayName("Проверка надписей в полях для 'Домашний интернет'")
+    @Title("Плейсхолдеры для Домашний интернет")
+    @Description("Проверка плейсхолдеров в полях формы для услуги 'Домашний интернет'")
+    @Severity(SeverityLevel.NORMAL)
+    @Story("Проверка плейсхолдеров")
     void testInternetPlaceholders() {
         homePage
                 .selectPaymentOption("Домашний интернет")
@@ -87,6 +110,10 @@ public class MtsOnlinePaymentTest {
 
     @Test
     @DisplayName("Проверка надписей в полях для 'Рассрочка'")
+    @Title("Плейсхолдеры для Рассрочка")
+    @Description("Проверка плейсхолдеров в полях формы для услуги 'Рассрочка'")
+    @Severity(SeverityLevel.NORMAL)
+    @Story("Проверка плейсхолдеров")
     void testInstalmentPlaceholders() {
         homePage
                 .selectPaymentOption("Рассрочка")
@@ -99,6 +126,10 @@ public class MtsOnlinePaymentTest {
 
     @Test
     @DisplayName("Проверка надписей в полях для 'Задолженность'")
+    @Title("Плейсхолдеры для Задолженность")
+    @Description("Проверка плейсхолдеров в полях формы для услуги 'Задолженность'")
+    @Severity(SeverityLevel.NORMAL)
+    @Story("Проверка плейсхолдеров")
     void testArrearsPlaceholders() {
         homePage
                 .selectPaymentOption("Задолженность")
