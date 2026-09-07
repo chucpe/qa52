@@ -3,6 +3,11 @@ package pages;
 import com.codeborne.selenide.ElementsCollection;
 import com.codeborne.selenide.SelenideElement;
 import com.codeborne.selenide.WebDriverRunner;
+import org.openqa.selenium.TimeoutException;
+import org.openqa.selenium.support.ui.ExpectedConditions;
+import org.openqa.selenium.support.ui.WebDriverWait;
+
+import java.time.Duration;
 
 import static com.codeborne.selenide.CollectionCondition.sizeGreaterThan;
 import static com.codeborne.selenide.Condition.text;
@@ -30,13 +35,11 @@ public class HomePage {
     }
 
     private HomePage closeCookieBanner() {
-        if (cookieBanner.isDisplayed()) {
-            try {
-                cookieAcceptButton.click();
-                Thread.sleep(1000);
-            } catch (Exception e) {
-                // ignore
-            }
+        try {
+            WebDriverWait wait = new WebDriverWait(WebDriverRunner.getWebDriver(), Duration.ofSeconds(5));
+            wait.until(ExpectedConditions.elementToBeClickable(cookieAcceptButton)).click();
+        } catch (TimeoutException e) {
+        } catch (Exception e) {
         }
         return this;
     }
@@ -59,9 +62,36 @@ public class HomePage {
     }
 
     public HomePage clickMoreDetailsAndVerify() {
-        moreDetailsLink.shouldBe(visible).click();
+        closeCookieBanner();
         String currentUrl = WebDriverRunner.url();
+        moreDetailsLink.shouldBe(visible).click();
+        WebDriverWait wait = new WebDriverWait(WebDriverRunner.getWebDriver(), Duration.ofSeconds(5));
+        wait.until(ExpectedConditions.not(ExpectedConditions.urlToBe(currentUrl)));
+        String newUrl = WebDriverRunner.url();
+        assert newUrl.contains("poryadok-oplaty") : "Expected URL to contain 'poryadok-oplaty', but got: " + newUrl;
+        try {
+            wait.until(ExpectedConditions.visibilityOf($("body")));
+            String bodyText = $("body").getText();
+            assert !bodyText.contains("404") && !bodyText.contains("Not Found") && !bodyText.contains("Ошибка")
+                    : "Page returned error: " + bodyText;
+        } catch (Exception e) {
+            throw new AssertionError("Page content verification failed", e);
+        }
         back();
+        wait.until(ExpectedConditions.urlToBe(currentUrl));
+        return this;
+    }
+
+    public HomePage validateCurrentUrl() {
+        String url = WebDriverRunner.url();
+        assert url != null && !url.isEmpty() : "URL is empty";
+        return this;
+    }
+
+    public HomePage validateCurrentUrl(String expectedPart) {
+        String url = WebDriverRunner.url();
+        assert url != null && url.contains(expectedPart) :
+                "URL does not contain '" + expectedPart + "'. Actual URL: " + url;
         return this;
     }
 

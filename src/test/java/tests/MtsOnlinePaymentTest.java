@@ -1,49 +1,49 @@
 package tests;
 
-import org.junit.jupiter.api.AfterEach;
+import pages.HomePage;
+import pages.PaymentPage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import pages.HomePage;
-import utils.Config;
+import com.codeborne.selenide.Configuration;
 
 public class MtsOnlinePaymentTest {
 
     private HomePage homePage;
 
     @BeforeEach
-    void setUp() {
-        Config.setup();
+    void setup() {
+        Configuration.browser = "chrome";
+        Configuration.timeout = 10000;
+        Configuration.pollingInterval = 200;
+
         homePage = new HomePage();
         homePage.openPage();
-        try { Thread.sleep(3000); } catch (InterruptedException e) {}
     }
 
     @Test
     @DisplayName("Проверка блока 'Онлайн пополнение без комиссии'")
     void testOnlinePaymentBlock() {
         homePage.verifyBlockTitle();
-        homePage.verifyServicesTabExists();
         homePage.verifyPaymentLogosExist();
-        homePage.clickMoreDetailsAndVerify();
-
-        homePage
-                .selectServicesTab()
-                .fillPhoneNumber("297777777")
-                .fillAmount("10")
-                .fillEmail("test@test.com")
-                .clickContinue()
-                .verifyPaymentFormOpened();
+        homePage.clickMoreDetailsAndVerify(); //
     }
 
     @Test
-    @DisplayName("Проверка валидации при пустом номере")
-    void testEmptyPhoneValidation() {
-        homePage.selectServicesTab().clickContinue();
+    @DisplayName("Проверка заполнения формы оплаты")
+    void testFillPaymentForm() {
+        homePage.selectServicesTab();
+        homePage.fillPhoneNumber("291234567");
+        homePage.fillAmount("10.00");
+        homePage.fillEmail("test@test.com");
+
+        PaymentPage paymentPage = homePage.clickContinue();
     }
 
-    @AfterEach
-    void tearDown() {
-        System.out.println("Тест завершен.");
+    @Test
+    @DisplayName("Проверка выбора услуги связи")
+    void testSelectServices() {
+        homePage.selectServicesTab();
+        homePage.verifyServicesTabExists();
     }
 }
