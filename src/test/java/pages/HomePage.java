@@ -5,15 +5,14 @@ import com.codeborne.selenide.ElementsCollection;
 import com.codeborne.selenide.SelenideElement;
 import com.codeborne.selenide.WebDriverRunner;
 
+import java.time.Duration;
+
 import static com.codeborne.selenide.CollectionCondition.sizeGreaterThan;
-import static com.codeborne.selenide.Condition.attribute;
-import static com.codeborne.selenide.Condition.text;
-import static com.codeborne.selenide.Condition.visible;
+import static com.codeborne.selenide.Condition.*;
 import static com.codeborne.selenide.Selenide.*;
 
 public class HomePage {
 
-    // === ЛОКАТОРЫ ===
     private final SelenideElement blockTitle = $("div.pay__wrapper h2");
     private final SelenideElement selectHeader = $(".select__header");
     private final SelenideElement connectionForm = $("#pay-connection");
@@ -21,7 +20,6 @@ public class HomePage {
     private final SelenideElement instalmentForm = $("#pay-instalment");
     private final SelenideElement arrearsForm = $("#pay-arrears");
 
-    // Поля для ввода (динамические, зависят от выбранной формы)
     private SelenideElement getPhoneInput() {
         return $(".pay-form.opened .phone, .pay-form.opened input[placeholder*='Номер']");
     }
@@ -34,20 +32,15 @@ public class HomePage {
         return $(".pay-form.opened .email, .pay-form.opened input[placeholder*='E-mail']");
     }
 
-    // Кнопка "Продолжить" для текущей формы
     private SelenideElement getContinueButton() {
         return $(".pay-form.opened .button__default");
     }
 
-    // Логотипы и ссылки
     private final ElementsCollection paymentLogos = $$("div.pay__partners img");
     private final SelenideElement moreDetailsLink = $("div.pay__wrapper a[href*='poryadok-oplaty']");
 
-    // Cookie
     private final SelenideElement cookieBanner = $(".cookie.show");
     private final SelenideElement cookieAcceptButton = $(".cookie__ok");
-
-    // === МЕТОДЫ ===
 
     public HomePage openPage() {
         open("https://www.mts.by");
@@ -55,13 +48,13 @@ public class HomePage {
     }
 
     private HomePage closeCookieBanner() {
-        if (cookieBanner.isDisplayed()) {
-            try {
-                cookieAcceptButton.click();
-                Thread.sleep(1000);
-            } catch (Exception e) {
-                // ignore
+        try {
+            if (cookieBanner.isDisplayed()) {
+                cookieAcceptButton.should(clickable, Duration.ofSeconds(5)).click();
+                cookieBanner.should(disappear, Duration.ofSeconds(10));
             }
+        } catch (Exception e) {
+            // ignore
         }
         return this;
     }
@@ -93,7 +86,6 @@ public class HomePage {
         SelenideElement option = $x(String.format("//li[contains(@class, 'select__item')]//p[text()='%s']", optionName));
         option.shouldBe(visible).click();
 
-        // Ждем, пока откроется нужная форма
         try {
             Thread.sleep(1000);
         } catch (InterruptedException e) {
@@ -104,14 +96,12 @@ public class HomePage {
     }
 
     public HomePage verifyPlaceholders(String expectedPhonePlaceholder, String expectedAmountPlaceholder, String expectedEmailPlaceholder) {
-        // Ждем, пока форма загрузится
         try {
             Thread.sleep(500);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
 
-        // Проверяем плейсхолдеры у активной формы
         SelenideElement phoneInput = getPhoneInput();
         SelenideElement amountInput = getAmountInput();
         SelenideElement emailInput = getEmailInput();
