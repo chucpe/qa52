@@ -1,21 +1,36 @@
 package utils;
 
 import com.codeborne.selenide.Configuration;
+import com.codeborne.selenide.Selenide;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+
+import static com.codeborne.selenide.Selenide.open;
 
 public class Config {
 
+    @BeforeEach
+    public void setUp() {
+        setup();
+    }
+
+    @AfterEach
+    public void tearDown() {
+        Selenide.closeWebDriver();
+    }
+
     public static void setup() {
-        // Настройки браузера
         Configuration.browser = "chrome";
         Configuration.browserSize = "1920x1080";
-        Configuration.headless = false;          // true - если нужно без GUI
-        Configuration.timeout = 15000;           // 15 секунд ожидания
-        Configuration.baseUrl = "https://www.mts.by";
-        Configuration.pageLoadTimeout = 30000;   // 30 секунд на загрузку страницы
+        Configuration.timeout = 10000;
+        Configuration.pageLoadTimeout = 30000;
+        Configuration.headless = false;
+        Configuration.savePageSource = false;
+        Configuration.screenshots = true;
+        Configuration.clickViaJs = false;
+    }
 
-        // Настройки для ускорения тестов
-        Configuration.holdBrowserOpen = false;   // Закрывать браузер после тестов
-        Configuration.screenshots = true;        // Делать скриншоты при падении
-        Configuration.savePageSource = true;     // Сохранять HTML при падении
+    public static void openPage(String url) {
+        open(url);
     }
 }
