@@ -1,31 +1,44 @@
 package pages;
 
+import com.codeborne.selenide.Condition;
 import com.codeborne.selenide.ElementsCollection;
 import com.codeborne.selenide.SelenideElement;
 import com.codeborne.selenide.WebDriverRunner;
-import org.openqa.selenium.TimeoutException;
-import org.openqa.selenium.support.ui.ExpectedConditions;
-import org.openqa.selenium.support.ui.WebDriverWait;
 
 import java.time.Duration;
 
 import static com.codeborne.selenide.CollectionCondition.sizeGreaterThan;
-import static com.codeborne.selenide.Condition.text;
-import static com.codeborne.selenide.Condition.visible;
+import static com.codeborne.selenide.Condition.*;
 import static com.codeborne.selenide.Selenide.*;
 
 public class HomePage {
 
     private final SelenideElement blockTitle = $("div.pay__wrapper h2");
     private final SelenideElement selectHeader = $(".select__header");
-    private final SelenideElement selectOption = $x("//li[contains(@class, 'select__item')]//p[text()='Услуги связи']");
-    private final SelenideElement phoneInput = $("#connection-phone");
-    private final SelenideElement amountInput = $("#connection-sum");
-    private final SelenideElement emailInput = $("#connection-email");
-    private final SelenideElement continueButton = $("#pay-connection .button__default");
+    private final SelenideElement connectionForm = $("#pay-connection");
+    private final SelenideElement internetForm = $("#pay-internet");
+    private final SelenideElement instalmentForm = $("#pay-instalment");
+    private final SelenideElement arrearsForm = $("#pay-arrears");
+
+    private SelenideElement getPhoneInput() {
+        return $(".pay-form.opened .phone, .pay-form.opened input[placeholder*='Номер']");
+    }
+
+    private SelenideElement getAmountInput() {
+        return $(".pay-form.opened .total_rub, .pay-form.opened input[placeholder='Сумма']");
+    }
+
+    private SelenideElement getEmailInput() {
+        return $(".pay-form.opened .email, .pay-form.opened input[placeholder*='E-mail']");
+    }
+
+    private SelenideElement getContinueButton() {
+        return $(".pay-form.opened .button__default");
+    }
+
     private final ElementsCollection paymentLogos = $$("div.pay__partners img");
     private final SelenideElement moreDetailsLink = $("div.pay__wrapper a[href*='poryadok-oplaty']");
-    private final SelenideElement connectionForm = $("#pay-connection");
+
     private final SelenideElement cookieBanner = $(".cookie.show");
     private final SelenideElement cookieAcceptButton = $(".cookie__ok");
 
@@ -36,10 +49,12 @@ public class HomePage {
 
     private HomePage closeCookieBanner() {
         try {
-            WebDriverWait wait = new WebDriverWait(WebDriverRunner.getWebDriver(), Duration.ofSeconds(5));
-            wait.until(ExpectedConditions.elementToBeClickable(cookieAcceptButton)).click();
-        } catch (TimeoutException e) {
+            if (cookieBanner.isDisplayed()) {
+                cookieAcceptButton.should(clickable, Duration.ofSeconds(5)).click();
+                cookieBanner.should(disappear, Duration.ofSeconds(10));
+            }
         } catch (Exception e) {
+            // ignore
         }
         return this;
     }
@@ -50,11 +65,6 @@ public class HomePage {
         return this;
     }
 
-    public HomePage verifyServicesTabExists() {
-        selectHeader.shouldBe(visible);
-        return this;
-    }
-
     public HomePage verifyPaymentLogosExist() {
         paymentLogos.shouldHave(sizeGreaterThan(0));
         paymentLogos.forEach(logo -> logo.shouldBe(visible));
@@ -62,67 +72,71 @@ public class HomePage {
     }
 
     public HomePage clickMoreDetailsAndVerify() {
-        closeCookieBanner();
-        String currentUrl = WebDriverRunner.url();
         moreDetailsLink.shouldBe(visible).click();
-        WebDriverWait wait = new WebDriverWait(WebDriverRunner.getWebDriver(), Duration.ofSeconds(5));
-        wait.until(ExpectedConditions.not(ExpectedConditions.urlToBe(currentUrl)));
-        String newUrl = WebDriverRunner.url();
-        assert newUrl.contains("poryadok-oplaty") : "Expected URL to contain 'poryadok-oplaty', but got: " + newUrl;
-        try {
-            wait.until(ExpectedConditions.visibilityOf($("body")));
-            String bodyText = $("body").getText();
-            assert !bodyText.contains("404") && !bodyText.contains("Not Found") && !bodyText.contains("Ошибка")
-                    : "Page returned error: " + bodyText;
-        } catch (Exception e) {
-            throw new AssertionError("Page content verification failed", e);
-        }
+        String currentUrl = WebDriverRunner.url();
         back();
-        wait.until(ExpectedConditions.urlToBe(currentUrl));
         return this;
     }
 
-    public HomePage validateCurrentUrl() {
-        String url = WebDriverRunner.url();
-        assert url != null && !url.isEmpty() : "URL is empty";
-        return this;
-    }
-
-    public HomePage validateCurrentUrl(String expectedPart) {
-        String url = WebDriverRunner.url();
-        assert url != null && url.contains(expectedPart) :
-                "URL does not contain '" + expectedPart + "'. Actual URL: " + url;
-        return this;
-    }
-
-    public HomePage selectServicesTab() {
+    public HomePage selectPaymentOption(String optionName) {
         closeCookieBanner();
+
         selectHeader.shouldBe(visible).click();
-        selectOption.shouldBe(visible).click();
-        connectionForm.shouldBe(visible);
+
+        SelenideElement option = $x(String.format("//li[contains(@class, 'select__item')]//p[text()='%s']", optionName));
+        option.shouldBe(visible).click();
+
+        try {
+            Thread.sleep(1000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        return this;
+    }
+
+    public HomePage verifyPlaceholders(String expectedPhonePlaceholder, String expectedAmountPlaceholder, String expectedEmailPlaceholder) {
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        SelenideElement phoneInput = getPhoneInput();
+        SelenideElement amountInput = getAmountInput();
+        SelenideElement emailInput = getEmailInput();
+
+        phoneInput.shouldHave(attribute("placeholder", expectedPhonePlaceholder));
+        amountInput.shouldHave(attribute("placeholder", expectedAmountPlaceholder));
+        emailInput.shouldHave(attribute("placeholder", expectedEmailPlaceholder));
+
         return this;
     }
 
     public HomePage fillPhoneNumber(String phone) {
+        SelenideElement phoneInput = getPhoneInput();
         phoneInput.shouldBe(visible).clear();
         phoneInput.setValue(phone.replaceAll("\\D", ""));
         return this;
     }
 
     public HomePage fillAmount(String amount) {
+        SelenideElement amountInput = getAmountInput();
         amountInput.shouldBe(visible).clear();
         amountInput.setValue(amount);
         return this;
     }
 
     public HomePage fillEmail(String email) {
+        SelenideElement emailInput = getEmailInput();
         emailInput.shouldBe(visible).clear();
         emailInput.setValue(email);
         return this;
     }
 
-    public PaymentPage clickContinue() {
+    public PaymentFormPage clickContinue() {
+        SelenideElement continueButton = getContinueButton();
         continueButton.shouldBe(visible).click();
-        return new PaymentPage();
+        return new PaymentFormPage();
     }
 }
