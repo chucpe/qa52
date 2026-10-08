@@ -7,7 +7,9 @@
 // @match        https://e8.ffa.su/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
-// @connect      m93907r0.beget.tech
+// @connect      raw.githubusercontent.com
+// @downloadURL https://raw.githubusercontent.com/chucpe/qa52/refs/heads/master/calc.js
+// @updateURL https://raw.githubusercontent.com/chucpe/qa52/refs/heads/master/calc.js
 // ==/UserScript==
 
 (function() {
@@ -37,7 +39,7 @@
         const box = document.createElement('div');
         box.id = 'hole-counter-box';
         box.style.cssText = `
-            position: fixed; top: 120px; right: 220px;
+            position: fixed; top: 440px; right: 40px;
             background-color: rgba(0, 0, 0, 0.85); color: #fff;
             padding: 12px; border-radius: 8px;
             font-family: Arial, sans-serif; font-size: 14px;
@@ -166,7 +168,7 @@
 (function() {
     'use strict';
 
-    const PRICE_URL = 'http://m93907r0.beget.tech/price.json';
+    const PRICE_URL = 'https://raw.githubusercontent.com/chucpe/qa52/refs/heads/master/src/price.json';
     const TARGET_SELECTOR = 'div.text-sm.font-semibold.break-all';
     const DECOR_ATTR = 'data-price-decorated';
     const DECOR_CLASS = 'price-decorated-span';
