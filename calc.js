@@ -388,3 +388,72 @@
     }
 })();
 
+(function() {
+    'use strict';
+
+    const DIALOG_TITLE = 'Характеристики продукции';
+
+    // CSS-правило: скрываем диалог с этим заголовком сразу, как только он появится
+    const style = document.createElement('style');
+    style.id = 'calc-hide-khar-style';
+    style.textContent = `
+        /* Скрываем сам диалог */
+        div[role="dialog"]:has(#reka-dialog-title-v1),
+        div.reka-dialog-content:has(#reka-dialog-title-v1) {
+            /* НЕ ставим display:none — данные остаются в DOM, но пользователь их не видит */
+            opacity: 0 !important;
+            pointer-events: none !important;
+            visibility: hidden !important;
+        }
+        /* Скрываем оверлей, чтобы фон не затемнялся */
+        div[data-slot="overlay"][data-state="open"] {
+            opacity: 0 !important;
+            pointer-events: none !important;
+            visibility: hidden !important;
+        }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+
+    // Дополнительно: если диалог всё же проявился — прячем точечно
+    function hideKharDialog() {
+        const dialogs = document.querySelectorAll(
+            'div.reka-dialog-content, div[role="dialog"]'
+        );
+        for (const dlg of dialogs) {
+            const titleEl = dlg.querySelector('#reka-dialog-title-v1, [data-slot="title"], h2');
+            const title = (titleEl?.textContent || '').trim();
+            if (!title.includes(DIALOG_TITLE)) continue;
+
+            // Прячем только сам диалог — данные внутри остаются
+            dlg.style.setProperty('opacity', '0', 'important');
+            dlg.style.setProperty('visibility', 'hidden', 'important');
+            dlg.style.setProperty('pointer-events', 'none', 'important');
+
+            // Прячем оверлей, чтобы экран не затемнялся
+            const overlays = document.querySelectorAll(
+                'div[data-slot="overlay"][data-state="open"]'
+            );
+            for (const ov of overlays) {
+                ov.style.setProperty('opacity', '0', 'important');
+                ov.style.setProperty('visibility', 'hidden', 'important');
+                ov.style.setProperty('pointer-events', 'none', 'important');
+            }
+        }
+    }
+
+    function start() {
+        hideKharDialog();
+        const observer = new MutationObserver(() => hideKharDialog());
+        observer.observe(document.body || document.documentElement, {
+            childList: true,
+            subtree: true
+        });
+        setInterval(hideKharDialog, 500);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start);
+    } else {
+        start();
+    }
+})();
