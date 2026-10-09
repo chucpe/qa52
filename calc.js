@@ -40,7 +40,7 @@
         box.id = 'hole-counter-box';
         box.style.cssText = `
             position: fixed; top: 440px; right: 40px;
-            background-color: rgba(0, 0, 0, 0.85); color: #fff;
+            background-color: rgba(0, 0, 0, 0.55); color: #fff;
             padding: 12px; border-radius: 8px;
             font-family: Arial, sans-serif; font-size: 14px;
             z-index: 99999; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
@@ -282,14 +282,84 @@
         }
     }
 
-    function start() {
+    const POPUP_TITLE = 'Напоминание';
+    const CLOSE_BTN_SELECTOR = 'button[aria-label="Закрыть"]';
+
+    function closeReminderPopup() {
+        const dialogs = document.querySelectorAll('div[role="dialog"], div.reka-dialog-content');
+        for (const dlg of dialogs) {
+            const titleEl = dlg.querySelector('h2, [data-slot="title"], #reka-dialog-title-v1');
+            const titleText = (titleEl?.textContent || '').trim();
+            if (!titleText.includes(POPUP_TITLE)) continue;
+
+            const closeBtn = dlg.querySelector(CLOSE_BTN_SELECTOR);
+            if (closeBtn) {
+                closeBtn.click();
+                console.log('[calc] Закрыт попап «Напоминание»');
+            } else {
+                dlg.style.setProperty('display', 'none', 'important');
+            }
+        }
+
+        const overlays = document.querySelectorAll('div[data-slot="overlay"][data-state="open"]');
+        for (const ov of overlays) {
+            const parent = ov.parentElement;
+            if (parent && !parent.querySelector('div[role="dialog"][data-state="open"]')) {
+                ov.style.setProperty('display', 'none', 'important');
+            }
+        }
+    }
+
+    function hideAll() {
         hideBanner();
-        const observer = new MutationObserver(() => hideBanner());
+        closeReminderPopup();
+    }
+
+    function start() {
+        hideAll();
+        const observer = new MutationObserver(() => hideAll());
         observer.observe(document.body || document.documentElement, {
             childList: true,
             subtree: true
         });
-        setInterval(hideBanner, 1000);
+        setInterval(hideAll, 1000);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start);
+    } else {
+        start();
+    }
+})();
+
+(function() {
+    'use strict';
+
+    const TARGET_SELECTOR = 'div.text-sm.font-semibold.break-all';
+    const ZAYAVKA_PREFIX = 'Заявка №';
+    const ZAYAVKA_COLOR = '#a855f7'; // фиолетовый
+
+    function styleZayavki() {
+        document.querySelectorAll(TARGET_SELECTOR).forEach(node => {
+            const text = (node.textContent || '').trim();
+            if (!text.startsWith(ZAYAVKA_PREFIX)) return;
+            if (node.dataset.zayavkaStyled === '1') return;
+
+            // Получаем текущий размер шрифта и увеличиваем на 1px
+            const currentSize = parseFloat(getComputedStyle(node).fontSize) || 14;
+            node.style.setProperty('font-size', (currentSize + 1) + 'px', 'important');
+            node.style.setProperty('color', ZAYAVKA_COLOR, 'important');
+            node.dataset.zayavkaStyled = '1';
+        });
+    }
+
+    function start() {
+        styleZayavki();
+        const observer = new MutationObserver(() => styleZayavki());
+        observer.observe(document.body || document.documentElement, {
+            childList: true, subtree: true
+        });
+        setInterval(styleZayavki, 1000);
     }
 
     if (document.readyState === 'loading') {
