@@ -339,105 +339,46 @@
 (function() {
     'use strict';
 
-    // --- CSS-скрытие любых модалок с текстом "Напоминание" ---
-    const style = document.createElement('style');
-    style.textContent = `
-        /* Скрываем любые диалоги */
-        div[role="dialog"],
-        div.reka-dialog-content,
-        dialog[open],
-        [data-slot="content"] {
-            /* Не трогаем все подряд — только те, что содержат "Напоминание" */
-        }
-        /* Общее правило на скрытие попапа по ID заголовка */
-        :is(div[role="dialog"], div.reka-dialog-content, dialog):has(h2#reka-dialog-title-v1),
-        :is(div[role="dialog"], div.reka-dialog-content, dialog):has(#reka-dialog-title-v1) {
-            display: none !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-        }
-        /* Скрываем оверлеи, чтобы они не блокировали клики */
-        [data-slot="overlay"],
-        [data-reka-dialog-overlay],
-        div[class*="overlay"][data-state="open"] {
-            display: none !important;
-            pointer-events: none !important;
-        }
-    `;
-    (document.head || document.documentElement).appendChild(style);
+    const POPUP_TITLE = 'Напоминание';
 
-    // --- JS-закрытие попапа любыми способами ---
-    const CLOSE_SELECTORS = [
-        'button[aria-label="Закрыть"]',
-        'button[aria-label="Close"]',
-        'button[data-slot="close"]',
-        'button[type="button"][class*="close"]',
-        '[role="dialog"] button:last-of-type',
-        'dialog button:last-of-type'
-    ];
-
-    const POPUP_TEXTS = ['Напоминание'];
-
-    function tryClosePopup() {
+    function closeReminderPopup() {
+        // Ищем всевозможные диалоги
         const candidates = document.querySelectorAll(
-            'div[role="dialog"], div.reka-dialog-content, dialog[open], [data-slot="content"]'
+            'div.reka-dialog-content, div[role="dialog"], dialog[open]'
         );
 
-        for (const el of candidates) {
-            const txt = (el.textContent || '').trim();
-            if (!POPUP_TEXTS.some(t => txt.includes(t))) continue;
+        for (const dlg of candidates) {
+            const text = (dlg.textContent || '');
+            if (!text.includes(POPUP_TITLE)) continue;
 
-            // 1) Пробуем найти и нажать кнопку закрытия
-            for (const sel of CLOSE_SELECTORS) {
-                const btn = el.querySelector(sel);
+            // Пробуем 3 селектора кнопки закрытия
+            const selectors = [
+                'button[aria-label="Закрыть"]',
+                'button[data-slot="close"]',
+                'button[type="button"]'
+            ];
+
+            for (const sel of selectors) {
+                const btn = dlg.querySelector(sel);
                 if (btn && !btn.disabled) {
-                    try {
-                        btn.click();
-                        console.log('[calc-mobile] Попап закрыт через', sel);
-                    } catch (e) {}
-                    break;
-                }
-            }
-
-            // 2) Дополнительно — скрываем сам элемент и его оверлей
-            el.style.setProperty('display', 'none', 'important');
-            el.style.setProperty('pointer-events', 'none', 'important');
-
-            // 3) Ищем и убираем оверлей
-            const overlays = document.querySelectorAll(
-                '[data-slot="overlay"], [data-reka-dialog-overlay], [data-state="open"]'
-            );
-            for (const ov of overlays) {
-                if (ov.contains(el) || ov.parentElement?.contains(el)) {
-                    ov.style.setProperty('display', 'none', 'important');
-                    ov.style.setProperty('pointer-events', 'none', 'important');
+                    btn.click();
+                    console.log('[calc] Закрыл попап через', sel);
+                    return; // выходим после первого успешного клика
                 }
             }
         }
-
-        // 4) Убираем возможный block scroll на body
-        document.body.style.removeProperty('overflow');
-        document.body.style.removeProperty('pointer-events');
-        document.documentElement.style.removeProperty('overflow');
     }
 
     function start() {
-        // Стартуем как можно раньше
-        tryClosePopup();
+        closeReminderPopup();
 
-        const observer = new MutationObserver(() => tryClosePopup());
-        observer.observe(document.documentElement, {
-            childList: true, subtree: true, attributes: true,
-            attributeFilter: ['data-state', 'open']
+        const observer = new MutationObserver(() => closeReminderPopup());
+        observer.observe(document.body || document.documentElement, {
+            childList: true,
+            subtree: true
         });
 
-        // Более частый интервал для мобилок (там события реже)
-        setInterval(tryClosePopup, 300);
-
-        // Также ловим момент, когда страница станет видимой
-        document.addEventListener('visibilitychange', tryClosePopup);
-        window.addEventListener('pageshow', tryClosePopup);
-        window.addEventListener('focus', tryClosePopup);
+        setInterval(closeReminderPopup, 500);
     }
 
     if (document.readyState === 'loading') {
