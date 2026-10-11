@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Калькулейшин
 // @namespace    Калькулейшин
-// @version      2.71
+// @version      2.72
 // @description  Подсчёт паллет/суммы + фильтр по датам + настройки + фиолетовые «Заявка №» + подписи цен
 // @match        https://e8.ffa.su/*
 // @grant        GM_xmlhttpRequest
@@ -1011,10 +1011,15 @@
     style.textContent = `
         div[role="dialog"]:has(#reka-dialog-title-v1),
         div.reka-dialog-content:has(#reka-dialog-title-v1) {
-            display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+            transform: scale(0.001) !important;
         }
         div[data-slot="overlay"][data-state="open"] {
-            display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
         }
     `;
     (document.head || document.documentElement).appendChild(style);
