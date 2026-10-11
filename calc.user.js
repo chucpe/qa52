@@ -1,14 +1,16 @@
 // ==UserScript==
 // @name         e8.ffa.su — подсчёт паллет и суммы
 // @namespace    https://e8.ffa.su/
-// @version      2.5.5
-// @description  Подсчёт паллет/суммы, фильтр по датам, настройки, автосворачивание, адаптив через JS
+// @version      2.6
+// @description  Подсчёт паллет/суммы, фильтр по датам, настройки, автосворачивание, фильтр по заявкам
 // @match        https://e8.ffa.su/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
 // @run-at       document-start
+// @downloadURL https://raw.githubusercontent.com/chucpe/qa52/refs/heads/master/calc.user.js
+// @updateURL https://raw.githubusercontent.com/chucpe/qa52/refs/heads/master/calc.user.js
 // ==/UserScript==
 
 (function () {
@@ -31,6 +33,7 @@
     rate: 0.48,
     tax: 13,
     autoMinimize: false,
+    orderFilter: '',
   };
 
   function loadSettings() {
@@ -42,6 +45,7 @@
         if (typeof s.rate === 'number' && s.rate > 0) settings.rate = s.rate;
         if (typeof s.tax === 'number' && s.tax >= 0 && s.tax < 100) settings.tax = s.tax;
         if (typeof s.autoMinimize === 'boolean') settings.autoMinimize = s.autoMinimize;
+        if (typeof s.orderFilter === 'string') settings.orderFilter = s.orderFilter;
       }
     } catch (e) {}
   }
@@ -60,6 +64,45 @@
     return arr.slice().sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
   }
 
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+  const escapeAttr = escapeHtml;
+
+  // ---------- фильтр по номерам заявок ----------
+  function parseOrderFilter(str) {
+    const s = String(str || '').trim();
+    if (!s) return null;
+
+    const m = s.match(/^(\d+)\s*[-–—]\s*(\d+)$/);
+    if (m) {
+      const a = Number(m[1]), b = Number(m[2]);
+      return { type: 'range', from: Math.min(a, b), to: Math.max(a, b) };
+    }
+
+    const parts = s.split(/[,\s;]+/).filter(Boolean);
+    if (parts.length) {
+      const nums = parts
+        .map(x => Number(String(x).replace(/\D/g, '')))
+        .filter(Number.isFinite);
+      if (nums.length) return { type: 'list', set: new Set(nums) };
+    }
+    return null;
+  }
+
+  function orderMatchesFilter(label, spec) {
+    if (!spec) return true;
+    const m = String(label || '').match(/(\d+)/);
+    if (!m) return true;
+    const num = Number(m[1]);
+    if (spec.type === 'range') return num >= spec.from && num <= spec.to;
+    if (spec.type === 'list')  return spec.set.has(num);
+    return true;
+  }
+
+  // ---------- дата/время ----------
   function toMskString(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
@@ -95,11 +138,13 @@
     return utcMs - MSK_OFFSET_MIN * 60 * 1000;
   }
 
+  // ---------- нормализация ----------
   function normalize(s) {
     return String(s || '').toLowerCase().replace(/\s+/g, '').replace(/[«»"']/g, '').trim();
   }
   function baseName(s) { return normalize(s).replace(/\([^)]*\)/g, ''); }
 
+  // ---------- прайс ----------
   function loadPrice() {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
@@ -136,6 +181,7 @@
     return null;
   }
 
+  // ---------- обработка ----------
   function extractItems(json) {
     if (!json) return null;
     if (Array.isArray(json.items)) return json.items;
@@ -166,7 +212,12 @@
     const from = filter.from;
     const to   = filter.to;
 
+    const orderFilterSpec = parseOrderFilter(settings.orderFilter);
+
     for (const order of items) {
+      // фильтр по номерам заявок
+      if (!orderMatchesFilter(order.label, orderFilterSpec)) continue;
+
       const orderStat = byOrder.get(order.label) || { pallets: 0, sum: 0 };
       for (const group of (order.children || [])) {
         for (const wp of (group.children || [])) {
@@ -257,6 +308,7 @@
     renderWindow();
   }
 
+  // ---------- перехват fetch/XHR ----------
   function patchFetch(target) {
     if (!target || !target.fetch || target.__e8patched) return;
     target.__e8patched = true;
@@ -297,14 +349,9 @@
     };
   }
 
+  // ---------- UI ----------
   GM_addStyle(`
-    #e8-calc-box{
-      position:fixed;right:20px;bottom:20px;left:auto;z-index:999999;
-      width:360px;max-width:calc(100vw - 24px);box-sizing:border-box;
-      background:#1e1e2e;color:#eee;border:1px solid #444;border-radius:10px;
-      font:13px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.5);
-      padding:12px 14px;
-    }
+    #e8-calc-box{position:fixed;right:20px;bottom:20px;left:auto;z-index:999999;width:360px;max-width:calc(100vw - 24px);box-sizing:border-box;background:#1e1e2e;color:#eee;border:1px solid #444;border-radius:10px;font:13px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.5);padding:12px 14px}
     #e8-calc-box.hidden{display:none}
     #e8-calc-box .row{display:flex;justify-content:space-between;margin:4px 0}
     #e8-calc-box .row.clickable{cursor:pointer;border-radius:4px;padding:2px 4px;margin-left:-4px;margin-right:-4px}
@@ -410,6 +457,9 @@
         <label>НДФЛ, %:</label>
         <input type="number" id="e8-tax-input" step="1" min="0" max="99" value="${settings.tax}">
 
+        <label>Заявки (напр. 30-40 или 30,32,35):</label>
+        <input type="text" id="e8-order-filter" placeholder="пусто = все" value="${escapeAttr(settings.orderFilter)}">
+
         <label class="chk">
           <input type="checkbox" id="e8-automin" ${settings.autoMinimize ? 'checked' : ''}>
           Автоматически сворачивать после загрузки
@@ -492,17 +542,19 @@
       if (Number.isFinite(rate) && rate > 0) settings.rate = rate;
       if (Number.isFinite(tax)  && tax >= 0 && tax < 100) settings.tax = tax;
       settings.autoMinimize = box.querySelector('#e8-automin').checked;
+      settings.orderFilter  = box.querySelector('#e8-order-filter').value.trim();
       saveSettings();
       log('Настройки применены:', settings);
       if (lastJson) processJobs(lastJson);
     });
 
     box.querySelector('#e8-settings-reset').addEventListener('click', () => {
-      settings = { opacity: 0.95, rate: 0.48, tax: 13, autoMinimize: settings.autoMinimize };
+      settings = { opacity: 0.95, rate: 0.48, tax: 13, autoMinimize: settings.autoMinimize, orderFilter: '' };
       box.querySelector('#e8-op-range').value = 95;
       box.querySelector('#e8-op-val').textContent = '95%';
       box.querySelector('#e8-rate-input').value = 0.48;
       box.querySelector('#e8-tax-input').value  = 13;
+      box.querySelector('#e8-order-filter').value = '';
       box.querySelector('#e8-automin').checked  = settings.autoMinimize;
       applyOpacity();
       saveSettings();
@@ -622,4 +674,69 @@
 
       let detailHtml = '';
       groups.forEach((entry, idx) => {
-        const { label,
+        const { label, g } = entry;
+        if (idx > 0) detailHtml += `<div class="pal-sep"></div>`;
+        detailHtml += `<div class="pal-head"><b>${escapeHtml(label)}</b> × ${g.pallets} <span class="unk-reason">(${[...g.reasons].join(', ')})</span></div>`;
+        if (g.times.length === 0) {
+          detailHtml += `<div class="pal"><span class="t">время: —</span></div>`;
+        } else {
+          for (const iso of g.times) {
+            detailHtml += `<div class="pal"><span class="t">${toMskString(iso)}</span><span class="n">${escapeHtml(label)}</span></div>`;
+          }
+        }
+      });
+
+      unknownHtml = `
+        <div class="row clickable" data-target="${key}">
+          <span>Не посчитано:</span>
+          <span class="val">
+            <span class="arr" style="opacity:.6;margin-right:4px;display:inline-block">▶</span><span class="unk-red">${unknownPallets}</span>
+          </span>
+        </div>
+        <div class="ord-detail" id="${key}">${detailHtml}</div>
+      `;
+    } else {
+      unknownHtml = `<div class="row"><span>Не посчитано:</span><span class="val">0</span></div>`;
+    }
+
+    const filterLine = (filter.from || filter.to || settings.orderFilter)
+      ? `<div style="font-size:11px;opacity:.6;margin-top:4px">${
+          (filter.from || filter.to)
+            ? `Даты: ${filter.from ? toMskString(new Date(filter.from).toISOString()) : '…'} — ${filter.to ? toMskString(new Date(filter.to).toISOString()) : '…'}`
+            : ''
+        }${
+          settings.orderFilter
+            ? `${(filter.from || filter.to) ? ' · ' : ''}Заявки: ${escapeHtml(settings.orderFilter)}`
+            : ''
+        }</div>`
+      : '';
+
+    body.innerHTML = `
+      <div class="row"><span>Всего паллет:</span><span class="val">${totalPalletsAll ?? totalPallets}</span></div>
+      <div class="row"><span>Посчитано паллет:</span><span class="val">${totalPallets}</span></div>
+      ${unknownHtml}
+      <div class="row"><span>Сумма:</span><span class="val sum">${money(totalSum)}</span></div>
+      ${filterLine}
+      ${ordersHtml ? `<div class="ord">${ordersHtml}</div>` : ''}
+    `;
+
+    body.querySelectorAll('.ord-head, .row.clickable').forEach(head => {
+      head.addEventListener('click', () => {
+        const id = head.getAttribute('data-target');
+        const detail = body.querySelector('#' + id);
+        const isOpen = head.classList.toggle('open');
+        if (detail) detail.classList.toggle('open', isOpen);
+      });
+    });
+  }
+
+  loadSettings();
+  loadPrice().catch(e => log('Ошибка загрузки прайса:', e));
+
+  function boot() {
+    ensureBox();
+  }
+
+  if (document.body) boot();
+  else window.addEventListener('DOMContentLoaded', boot);
+})();
