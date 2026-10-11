@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         e8.ffa.su — подсчёт паллет и суммы
 // @namespace    https://e8.ffa.su/
-// @version      2.5.2
+// @version      2.5.3
 // @description  Подсчёт паллет/суммы, фильтр по датам, настройки (прозрачность, ставка, НДФЛ, автосворачивание), раскрытие
 // @match        https://e8.ffa.su/*
 // @grant        GM_xmlhttpRequest
