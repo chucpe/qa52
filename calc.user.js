@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Калькулейшн
-// @namespace    Калькулейшн
-// @version      2.7
+// @name         Калькулейшин
+// @namespace    Калькулейшин
+// @version      2.71
 // @description  Подсчёт паллет/суммы + фильтр по датам + настройки + фиолетовые «Заявка №» + подписи цен
 // @match        https://e8.ffa.su/*
 // @grant        GM_xmlhttpRequest
@@ -1006,83 +1006,18 @@
 
 (function() {
     'use strict';
-
-    // 1) CSS: скрываем диалоги и оверлеи БЕЗ условия на data-state=open.
     const style = document.createElement('style');
-    style.id = 'calc-hide-dialog-global';
+    style.id = 'calc-hide-khar-style';
     style.textContent = `
-        div[role="dialog"],
-        div.reka-dialog-content {
+        div[role="dialog"]:has(#reka-dialog-title-v1),
+        div.reka-dialog-content:has(#reka-dialog-title-v1) {
             display: none !important;
         }
-        /* Скрываем оверлей по самому атрибуту, не дожидаясь data-state=open */
-        div[data-slot="overlay"] {
+        div[data-slot="overlay"][data-state="open"] {
             display: none !important;
         }
     `;
     (document.head || document.documentElement).appendChild(style);
-
-    // 2) Обработчик: решаем, какие диалоги показать, какие оставить скрытыми.
-    function processDialogs() {
-        let hasChar = false;
-
-        document.querySelectorAll('div[role="dialog"], div.reka-dialog-content').forEach(dlg => {
-            const titleEl = dlg.querySelector('#reka-dialog-title-v1, [data-slot="title"], h2');
-            const title = (titleEl?.textContent || '').trim();
-            const isChar = title.includes('Характеристики продукции');
-
-            if (isChar) {
-                dlg.style.setProperty('display', 'none', 'important');
-                hasChar = true;
-            } else {
-                dlg.style.removeProperty('display');
-            }
-        });
-
-        // Оверлей показываем только если есть чужой диалог (не «Характеристики»)
-        document.querySelectorAll('div[data-slot="overlay"]').forEach(ov => {
-            // Если есть хоть один чужой диалог — покажем оверлей
-            const anyOther = [...document.querySelectorAll('div[role="dialog"], div.reka-dialog-content')]
-                .some(dlg => {
-                    const t = dlg.querySelector('#reka-dialog-title-v1, [data-slot="title"], h2')?.textContent || '';
-                    return !t.includes('Характеристики продукции');
-                });
-            if (anyOther) ov.style.removeProperty('display');
-            else ov.style.setProperty('display', 'none', 'important');
-        });
-    }
-
-    // 3) MutationObserver на documentElement — вызывается до первого кадра
-    const observer = new MutationObserver(() => {
-        processDialogs();
-    });
-    observer.observe(document.documentElement, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['data-state']  // ловим именно момент, когда оверлей получает data-state=open
-    });
-
-    // 4) По клику на «Характеристики продукции» — на ОДИН кадр скрываем html.
-    //    Это гарантирует, что даже если оверлей успел отрисоваться — он не мелькнёт.
-    document.addEventListener('click', (e) => {
-        const btn = e.target?.closest?.('button');
-        if (!btn) return;
-        if (!(btn.textContent || '').includes('Характеристики продукции')) return;
-
-        const html = document.documentElement;
-        const prev = html.style.visibility;
-        html.style.visibility = 'hidden';
-
-        // вернуть в СЛЕДУЮЩЕМ кадре — 16 мс, глазу не заметно
-        requestAnimationFrame(() => {
-            html.style.visibility = prev || '';
-            processDialogs();
-        });
-    }, true);
-
-    // 5) Страховочный периодический прогон
-    setInterval(processDialogs, 1000);
 })();
 
 //Подсчет количества отверсий и диалоговое окно
