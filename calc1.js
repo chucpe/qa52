@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         e8.ffa.su — подсчёт паллет и суммы
 // @namespace    https://e8.ffa.su/
-// @version      2.5.3
-// @description  Подсчёт паллет/суммы, фильтр по датам, настройки (прозрачность, ставка, НДФЛ, автосворачивание), раскрытие
+// @version      2.5.5
+// @description  Подсчёт паллет/суммы, фильтр по датам, настройки, автосворачивание, адаптив через JS
 // @match        https://e8.ffa.su/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -26,7 +26,6 @@
   let lastJson = null;
   let filter = { from: null, to: null };
 
-  // ---------- настройки ----------
   let settings = {
     opacity: 0.95,
     rate: 0.48,
@@ -61,7 +60,6 @@
     return arr.slice().sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
   }
 
-  // ---------- дата/время ----------
   function toMskString(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
@@ -97,13 +95,11 @@
     return utcMs - MSK_OFFSET_MIN * 60 * 1000;
   }
 
-  // ---------- нормализация ----------
   function normalize(s) {
     return String(s || '').toLowerCase().replace(/\s+/g, '').replace(/[«»"']/g, '').trim();
   }
   function baseName(s) { return normalize(s).replace(/\([^)]*\)/g, ''); }
 
-  // ---------- прайс ----------
   function loadPrice() {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
@@ -140,7 +136,6 @@
     return null;
   }
 
-  // ---------- обработка ----------
   function extractItems(json) {
     if (!json) return null;
     if (Array.isArray(json.items)) return json.items;
@@ -262,7 +257,6 @@
     renderWindow();
   }
 
-  // ---------- перехват fetch/XHR ----------
   function patchFetch(target) {
     if (!target || !target.fetch || target.__e8patched) return;
     target.__e8patched = true;
@@ -303,9 +297,14 @@
     };
   }
 
-  // ---------- UI ----------
   GM_addStyle(`
-    #e8-calc-box{position:fixed;right:20px;bottom:20px;z-index:999999;width:360px;background:#1e1e2e;color:#eee;border:1px solid #444;border-radius:10px;font:13px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.5);padding:12px 14px}
+    #e8-calc-box{
+      position:fixed;right:20px;bottom:20px;left:auto;z-index:999999;
+      width:360px;max-width:calc(100vw - 24px);box-sizing:border-box;
+      background:#1e1e2e;color:#eee;border:1px solid #444;border-radius:10px;
+      font:13px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.5);
+      padding:12px 14px;
+    }
     #e8-calc-box.hidden{display:none}
     #e8-calc-box .row{display:flex;justify-content:space-between;margin:4px 0}
     #e8-calc-box .row.clickable{cursor:pointer;border-radius:4px;padding:2px 4px;margin-left:-4px;margin-right:-4px}
@@ -354,6 +353,28 @@
     #e8-calc-mini:hover{background:#2563eb;transform:scale(1.05)}
     #e8-calc-mini.hidden{display:none}
   `);
+
+  function applyAdaptiveLayout() {
+    const box = document.getElementById('e8-calc-box');
+    if (!box) return;
+    const narrow = window.innerWidth < 460;
+    if (narrow) {
+      box.style.left = '12px';
+      box.style.right = '12px';
+      box.style.width = 'auto';
+      box.style.maxWidth = 'none';
+      box.style.bottom = '12px';
+    } else {
+      box.style.left = 'auto';
+      box.style.right = '20px';
+      box.style.width = '360px';
+      box.style.maxWidth = 'calc(100vw - 24px)';
+      box.style.bottom = '20px';
+    }
+  }
+
+  window.addEventListener('resize', applyAdaptiveLayout);
+  window.addEventListener('orientationchange', applyAdaptiveLayout);
 
   function ensureBox() {
     let box = document.getElementById('e8-calc-box');
@@ -504,6 +525,7 @@
       setMinimized(savedMin);
     }
 
+    applyAdaptiveLayout();
     return box;
   }
 
@@ -600,72 +622,4 @@
 
       let detailHtml = '';
       groups.forEach((entry, idx) => {
-        const { label, g } = entry;
-        if (idx > 0) detailHtml += `<div class="pal-sep"></div>`;
-        detailHtml += `<div class="pal-head"><b>${escapeHtml(label)}</b> × ${g.pallets} <span class="unk-reason">(${[...g.reasons].join(', ')})</span></div>`;
-        if (g.times.length === 0) {
-          detailHtml += `<div class="pal"><span class="t">время: —</span></div>`;
-        } else {
-          for (const iso of g.times) {
-            detailHtml += `<div class="pal"><span class="t">${toMskString(iso)}</span><span class="n">${escapeHtml(label)}</span></div>`;
-          }
-        }
-      });
-
-      unknownHtml = `
-        <div class="row clickable" data-target="${key}">
-          <span>Не посчитано:</span>
-          <span class="val">
-            <span class="arr" style="opacity:.6;margin-right:4px;display:inline-block">▶</span><span class="unk-red">${unknownPallets}</span>
-          </span>
-        </div>
-        <div class="ord-detail" id="${key}">${detailHtml}</div>
-      `;
-    } else {
-      unknownHtml = `<div class="row"><span>Не посчитано:</span><span class="val">0</span></div>`;
-    }
-
-    const filterLine = (filter.from || filter.to)
-      ? `<div style="font-size:11px;opacity:.6;margin-top:4px">Фильтр: ${
-          filter.from ? toMskString(new Date(filter.from).toISOString()) : '…'
-        } — ${
-          filter.to ? toMskString(new Date(filter.to).toISOString()) : '…'
-        }</div>`
-      : '';
-
-    body.innerHTML = `
-      <div class="row"><span>Всего паллет:</span><span class="val">${totalPalletsAll ?? totalPallets}</span></div>
-      <div class="row"><span>Посчитано паллет:</span><span class="val">${totalPallets}</span></div>
-      ${unknownHtml}
-      <div class="row"><span>Сумма:</span><span class="val sum">${money(totalSum)}</span></div>
-      ${filterLine}
-      ${ordersHtml ? `<div class="ord">${ordersHtml}</div>` : ''}
-    `;
-
-    body.querySelectorAll('.ord-head, .row.clickable').forEach(head => {
-      head.addEventListener('click', () => {
-        const id = head.getAttribute('data-target');
-        const detail = body.querySelector('#' + id);
-        const isOpen = head.classList.toggle('open');
-        if (detail) detail.classList.toggle('open', isOpen);
-      });
-    });
-  }
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, c => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    }[c]));
-  }
-
-  // ---------- запуск ----------
-  loadSettings();
-  loadPrice().catch(e => log('Ошибка загрузки прайса:', e));
-
-  function boot() {
-    ensureBox();
-  }
-
-  if (document.body) boot();
-  else window.addEventListener('DOMContentLoaded', boot);
-})();
+        const { label,
