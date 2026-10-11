@@ -1,16 +1,16 @@
 // ==UserScript==
-// @name         e8.ffa.su — подсчёт паллет и суммы
-// @namespace    https://e8.ffa.su/
-// @version      2.6
-// @description  Подсчёт паллет/суммы, фильтр по датам, настройки, автосворачивание, фильтр по заявкам
+// @name         Калькулейшн
+// @namespace    Калькулейшн
+// @version      2.7
+// @description  Подсчёт паллет/суммы + фильтр по датам + настройки + фиолетовые «Заявка №» + подписи цен
 // @match        https://e8.ffa.su/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
 // @run-at       document-start
-// @downloadURL https://raw.githubusercontent.com/chucpe/qa52/refs/heads/master/calc.user.js
-// @updateURL https://raw.githubusercontent.com/chucpe/qa52/refs/heads/master/calc.user.js
+// @downloadURL https://raw.githubusercontent.com/chucpe/qa52/master/calc.user.js
+// @updateURL   https://raw.githubusercontent.com/chucpe/qa52/master/calc.user.js
 // ==/UserScript==
 
 (function () {
@@ -215,7 +215,6 @@
     const orderFilterSpec = parseOrderFilter(settings.orderFilter);
 
     for (const order of items) {
-      // фильтр по номерам заявок
       if (!orderMatchesFilter(order.label, orderFilterSpec)) continue;
 
       const orderStat = byOrder.get(order.label) || { pallets: 0, sum: 0 };
@@ -739,4 +738,533 @@
 
   if (document.body) boot();
   else window.addEventListener('DOMContentLoaded', boot);
+})();
+
+// ==================================================================
+// МОДУЛЬ A. ФИОЛЕТОВЫЙ ЦВЕТ «Заявка №» НА СТРАНИЦЕ
+// ==================================================================
+(function() {
+  'use strict';
+
+  const TARGET_SELECTOR = 'div.text-sm.font-semibold.break-all';
+  const ZAYAVKA_PREFIX = 'Заявка №';
+  const ZAYAVKA_COLOR = '#a855f7';
+
+  function styleZayavki() {
+    document.querySelectorAll(TARGET_SELECTOR).forEach(node => {
+      const text = (node.textContent || '').trim();
+      if (!text.startsWith(ZAYAVKA_PREFIX)) return;
+      if (node.dataset.zayavkaStyled === '1') return;
+
+      const currentSize = parseFloat(getComputedStyle(node).fontSize) || 14;
+      node.style.setProperty('font-size', (currentSize + 1) + 'px', 'important');
+      node.style.setProperty('color', ZAYAVKA_COLOR, 'important');
+      node.dataset.zayavkaStyled = '1';
+    });
+  }
+
+  function start() {
+    styleZayavki();
+    const observer = new MutationObserver(() => styleZayavki());
+    observer.observe(document.body || document.documentElement, {
+      childList: true, subtree: true
+    });
+    setInterval(styleZayavki, 1000);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
+
+// ==================================================================
+// МОДУЛЬ B. ПОДПИСЬ ЦЕНЫ СПРАВА ОТ НАЗВАНИЯ (из price.json)
+// ==================================================================
+(function() {
+  'use strict';
+
+  const PRICE_URL = 'https://raw.githubusercontent.com/chucpe/qa52/master/src/price.json';
+  const TARGET_SELECTOR = 'div.text-sm.font-semibold.break-all';
+  const DECOR_ATTR = 'data-price-decorated';
+
+  const RATE = 0.48;
+  const TAX_MULTIPLIER = 0.87;
+  const PRICE_COLOR = '#7dd87d';
+
+  let priceByName = {};
+  let priceLoaded = false;
+
+  function loadPrices() {
+    return new Promise((resolve) => {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: PRICE_URL + '?t=' + Date.now(),
+        onload: (resp) => {
+          if (resp.status !== 200) { resolve(false); return; }
+          const trimmed = resp.responseText.trim();
+          if (!trimmed.startsWith('[') && !trimmed.startsWith('{')) { resolve(false); return; }
+          try {
+            const data = JSON.parse(resp.responseText);
+            if (!Array.isArray(data)) throw new Error('not array');
+            priceByName = {};
+            data.forEach(item => {
+              if (!item || !item.name) return;
+              if (typeof item.holes !== 'number') return;
+              priceByName[item.name.trim()] = item.holes * RATE * TAX_MULTIPLIER;
+            });
+            priceLoaded = true;
+            resolve(true);
+          } catch (e) { resolve(false); }
+        },
+        onerror: () => resolve(false),
+        ontimeout: () => resolve(false),
+        timeout: 10000
+      });
+    });
+  }
+
+  function normalize(str) {
+    return (str || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  function findPriceByText(text) {
+    const t = normalize(text);
+    if (!t) return null;
+    for (const [name, price] of Object.entries(priceByName)) {
+      if (normalize(name) === t) return { name, price };
+    }
+    for (const [name, price] of Object.entries(priceByName)) {
+      const n = normalize(name);
+      if (n.startsWith(t + ' ')) return { name, price };
+    }
+    for (const [name, price] of Object.entries(priceByName)) {
+      const n = normalize(name);
+      if (t.startsWith(n + ' ')) return { name, price };
+    }
+    return null;
+  }
+
+  function decorate() {
+    if (!priceLoaded) return;
+    document.querySelectorAll(TARGET_SELECTOR).forEach(node => {
+      if (node.hasAttribute(DECOR_ATTR)) return;
+      const text = (node.textContent || '').trim();
+      if (!text) return;
+      const match = findPriceByText(text);
+      if (!match) return;
+
+      const span = document.createElement('span');
+      span.style.cssText = `color:${PRICE_COLOR}; font-weight:bold; margin-left:6px;`;
+      span.textContent = `(${match.price.toFixed(2)})`;
+      node.appendChild(span);
+      node.setAttribute(DECOR_ATTR, '1');
+    });
+  }
+
+  loadPrices().then((ok) => {
+    if (!ok) return;
+    decorate();
+
+    const observer = new MutationObserver(() => decorate());
+    observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+
+    let lastUrl = location.href;
+    setInterval(() => {
+      if (location.href !== lastUrl) {
+        lastUrl = location.href;
+        setTimeout(decorate, 300);
+      }
+    }, 500);
+  });
+})();
+
+//Установка приложения(скрываем баннер)
+(function() {
+    'use strict';
+
+    const DESCRIPTION_SELECTOR = 'div[data-slot="description"]';
+    const DESCRIPTION_TEXT = 'Вы можете установить систему как приложение';
+    const MARK = 'data-e8-banner-hidden';
+
+    // Найти ближайшего предка с fixed/sticky позицией — это и есть контейнер баннера
+    function findBannerContainer(start) {
+        let el = start;
+        for (let i = 0; i < 8 && el; i++) {
+            const st = getComputedStyle(el);
+            if (st.position === 'fixed' || st.position === 'sticky') return el;
+            el = el.parentElement;
+        }
+        // fallback — родитель на 2 уровня выше
+        return start.parentElement?.parentElement || start.parentElement || start;
+    }
+
+    function hideBanner() {
+        document.querySelectorAll(DESCRIPTION_SELECTOR).forEach(node => {
+            const text = (node.textContent || '').trim();
+            if (!text.includes(DESCRIPTION_TEXT)) return;
+
+            const container = findBannerContainer(node);
+            if (!container || container.dataset.e8BannerHidden === '1') return;
+
+            container.style.setProperty('display', 'none', 'important');
+            container.setAttribute(MARK, '1');
+        });
+    }
+
+    function start() {
+        hideBanner();
+
+        const observer = new MutationObserver(() => hideBanner());
+        observer.observe(document.body || document.documentElement, {
+            childList: true, subtree: true
+        });
+
+        setInterval(hideBanner, 500);
+
+        // Переинициализация observer при SPA-навигации
+        const reobserve = () => {
+            try { observer.disconnect(); } catch (e) {}
+            if (document.body) {
+                observer.observe(document.body, { childList: true, subtree: true });
+            }
+            hideBanner();
+        };
+
+        let lastHref = location.href;
+        setInterval(() => {
+            if (location.href !== lastHref) {
+                lastHref = location.href;
+                reobserve();
+            }
+        }, 300);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start);
+    } else {
+        start();
+    }
+})();
+
+//Скрываем баннер "Напоминание"
+(function() {
+    'use strict';
+
+    const POPUP_TITLE = 'Напоминание';
+
+    function closeReminderPopup() {
+        // Ищем всевозможные диалоги
+        const candidates = document.querySelectorAll(
+            'div.reka-dialog-content, div[role="dialog"], dialog[open]'
+        );
+
+        for (const dlg of candidates) {
+            const text = (dlg.textContent || '');
+            if (!text.includes(POPUP_TITLE)) continue;
+
+            // Пробуем 3 селектора кнопки закрытия
+            const selectors = [
+                'button[aria-label="Закрыть"]',
+                'button[data-slot="close"]',
+                'button[type="button"]'
+            ];
+
+            for (const sel of selectors) {
+                const btn = dlg.querySelector(sel);
+                if (btn && !btn.disabled) {
+                    btn.click();
+                    console.log('[calc] Закрыл попап через', sel);
+                    return; // выходим после первого успешного клика
+                }
+            }
+        }
+    }
+
+    function start() {
+        closeReminderPopup();
+
+        const observer = new MutationObserver(() => closeReminderPopup());
+        observer.observe(document.body || document.documentElement, {
+            childList: true,
+            subtree: true
+        });
+
+        setInterval(closeReminderPopup, 500);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start);
+    } else {
+        start();
+    }
+})();
+
+
+//Запрещаем открытие кнопки "Характеристика продукции"
+
+(function() {
+    'use strict';
+
+    // 1) CSS: скрываем диалоги и оверлеи БЕЗ условия на data-state=open.
+    const style = document.createElement('style');
+    style.id = 'calc-hide-dialog-global';
+    style.textContent = `
+        div[role="dialog"],
+        div.reka-dialog-content {
+            display: none !important;
+        }
+        /* Скрываем оверлей по самому атрибуту, не дожидаясь data-state=open */
+        div[data-slot="overlay"] {
+            display: none !important;
+        }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+
+    // 2) Обработчик: решаем, какие диалоги показать, какие оставить скрытыми.
+    function processDialogs() {
+        let hasChar = false;
+
+        document.querySelectorAll('div[role="dialog"], div.reka-dialog-content').forEach(dlg => {
+            const titleEl = dlg.querySelector('#reka-dialog-title-v1, [data-slot="title"], h2');
+            const title = (titleEl?.textContent || '').trim();
+            const isChar = title.includes('Характеристики продукции');
+
+            if (isChar) {
+                dlg.style.setProperty('display', 'none', 'important');
+                hasChar = true;
+            } else {
+                dlg.style.removeProperty('display');
+            }
+        });
+
+        // Оверлей показываем только если есть чужой диалог (не «Характеристики»)
+        document.querySelectorAll('div[data-slot="overlay"]').forEach(ov => {
+            // Если есть хоть один чужой диалог — покажем оверлей
+            const anyOther = [...document.querySelectorAll('div[role="dialog"], div.reka-dialog-content')]
+                .some(dlg => {
+                    const t = dlg.querySelector('#reka-dialog-title-v1, [data-slot="title"], h2')?.textContent || '';
+                    return !t.includes('Характеристики продукции');
+                });
+            if (anyOther) ov.style.removeProperty('display');
+            else ov.style.setProperty('display', 'none', 'important');
+        });
+    }
+
+    // 3) MutationObserver на documentElement — вызывается до первого кадра
+    const observer = new MutationObserver(() => {
+        processDialogs();
+    });
+    observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['data-state']  // ловим именно момент, когда оверлей получает data-state=open
+    });
+
+    // 4) По клику на «Характеристики продукции» — на ОДИН кадр скрываем html.
+    //    Это гарантирует, что даже если оверлей успел отрисоваться — он не мелькнёт.
+    document.addEventListener('click', (e) => {
+        const btn = e.target?.closest?.('button');
+        if (!btn) return;
+        if (!(btn.textContent || '').includes('Характеристики продукции')) return;
+
+        const html = document.documentElement;
+        const prev = html.style.visibility;
+        html.style.visibility = 'hidden';
+
+        // вернуть в СЛЕДУЮЩЕМ кадре — 16 мс, глазу не заметно
+        requestAnimationFrame(() => {
+            html.style.visibility = prev || '';
+            processDialogs();
+        });
+    }, true);
+
+    // 5) Страховочный периодический прогон
+    setInterval(processDialogs, 1000);
+})();
+
+//Подсчет количества отверсий и диалоговое окно
+
+(function() {
+    'use strict';
+
+    const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+
+    const STORAGE_KEY_SUM    = 'e8_hole_counter_sum';
+    const STORAGE_KEY_PALLET = 'e8_pallet_counter_sum';
+
+    let totalSum = 0;
+    let palletSum = 0;
+    let waitingForCharData = false;
+
+    try {
+        const s = localStorage.getItem(STORAGE_KEY_SUM);
+        if (s !== null) { const p = parseInt(s, 10); if (!isNaN(p)) totalSum = p; }
+        const p2 = localStorage.getItem(STORAGE_KEY_PALLET);
+        if (p2 !== null) { const p = parseInt(p2, 10); if (!isNaN(p)) palletSum = p; }
+    } catch (e) {}
+
+    function saveSum()    { try { localStorage.setItem(STORAGE_KEY_SUM, String(totalSum)); } catch (e) {} }
+    function savePallet() { try { localStorage.setItem(STORAGE_KEY_PALLET, String(palletSum)); } catch (e) {} }
+
+    function createQuote() {
+        if (document.getElementById('hole-counter-quote')) return;
+
+        const q = document.createElement('div');
+        q.id = 'hole-counter-quote';
+        q.style.cssText = `
+            position: fixed;
+            right: 20px;
+            bottom: 74px;
+            z-index: 999999;
+            background: #1e1e2e;
+            color: #eee;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 8px 26px 8px 12px;
+            font: 12px/1.4 system-ui, sans-serif;
+            box-shadow: 0 6px 18px rgba(0,0,0,.5);
+            min-width: 170px;
+            max-width: calc(100vw - 40px);
+            box-sizing: border-box;
+            display: none;
+            user-select: none;
+        `;
+
+        q.innerHTML = `
+            <span id="hole-counter-quote-close" style="
+                position:absolute; top:4px; right:6px;
+                cursor:pointer; opacity:.6; font-size:14px; line-height:1;
+            " title="Закрыть">×</span>
+            <div style="display:flex; justify-content:space-between; gap:14px; color:#7CFC9B;">
+                <span>Заработок:</span>
+                <span id="hole-counter-earnings" style="font-weight:700;">0.00</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; gap:14px; margin-top:2px; color:#fbbf24;">
+                <span>Отверстий:</span>
+                <span id="hole-counter-value" style="font-weight:700;">0</span>
+            </div>
+            <button id="hole-counter-reset" style="
+                margin-top:8px;
+                width:100%;
+                cursor:pointer;
+                background:#ef4444;
+                color:#fff;
+                border:0;
+                border-radius:5px;
+                padding:4px 8px;
+                font:600 11px system-ui,sans-serif;
+            ">Сброс</button>
+        `;
+
+        document.body.appendChild(q);
+
+        q.querySelector('#hole-counter-quote-close').addEventListener('click', () => {
+            q.style.display = 'none';
+        });
+
+        q.querySelector('#hole-counter-reset').addEventListener('click', () => {
+            totalSum = 0;
+            palletSum = 0;
+            saveSum();
+            savePallet();
+            updateDisplay();
+        });
+
+        updateDisplay();
+    }
+
+    function updateDisplay() {
+        const earningsSpan = document.getElementById('hole-counter-earnings');
+        const valueSpan    = document.getElementById('hole-counter-value');
+        const step1 = totalSum * 0.48;
+        const step2 = step1 * 0.87;
+        if (earningsSpan) earningsSpan.textContent = step2.toFixed(2);
+        if (valueSpan)    valueSpan.textContent    = totalSum;
+    }
+
+    function showQuote() {
+        const q = document.getElementById('hole-counter-quote');
+        if (!q) return;
+        q.style.display = 'block';
+    }
+
+    function isRequired(item) {
+        if (!item.category || !item.category.label) return false;
+        return item.category.label.trim() === 'ЛДСП';
+    }
+
+    function traverse(node, acc) {
+        if (!node || typeof node !== 'object') return;
+        if (typeof node.totalHole === 'number' && isRequired(node)) acc.holes += node.totalHole;
+        if (typeof node.count === 'number') acc.pallets += node.count;
+        if (Array.isArray(node.children)) node.children.forEach(ch => traverse(ch, acc));
+        if (Array.isArray(node.items))    node.items.forEach(ch => traverse(ch, acc));
+    }
+
+    function processJsonData(data) {
+        if (!data) return;
+
+        const acc = { holes: 0, pallets: 0 };
+        traverse(data, acc);
+
+        if (acc.holes > 0)   { totalSum  += acc.holes;   saveSum(); }
+        if (acc.pallets > 0) { palletSum += acc.pallets; savePallet(); }
+
+        // Показываем цитату только если ждали данных от «Характеристик продукции»
+        if (waitingForCharData && (acc.holes > 0 || acc.pallets > 0)) {
+            updateDisplay();
+            showQuote();
+            waitingForCharData = false;
+        } else if (acc.holes > 0 || acc.pallets > 0) {
+            updateDisplay();
+        }
+    }
+
+    // === Клик по «Характеристики продукции» ===
+    document.addEventListener('click', (e) => {
+        const target = e.target;
+        if (!target || !target.closest) return;
+
+        const btn = target.closest('button, [role="button"], a, div, span, [data-slot="trigger"]');
+        if (!btn) return;
+
+        const text = (btn.textContent || '').trim();
+        if (!text.includes('Характеристики продукции')) return;
+
+        waitingForCharData = true;
+        // страховка: если данных нет 5 сек — сбрасываем флаг
+        setTimeout(() => { waitingForCharData = false; }, 5000);
+    }, true);
+
+    const originalOpen = W.XMLHttpRequest.prototype.open;
+    W.XMLHttpRequest.prototype.open = function(method, url) {
+        this.addEventListener('load', function() {
+            if (this.status === 200 && this.responseText) {
+                try {
+                    const json = JSON.parse(this.responseText);
+                    if (json && (json.items || json.other)) processJsonData(json);
+                } catch (e) {}
+            }
+        });
+        return originalOpen.apply(this, arguments);
+    };
+
+    const originalFetch = W.fetch;
+    W.fetch = async function(...args) {
+        const response = await originalFetch.apply(this, args);
+        const clone = response.clone();
+        clone.json().then(data => {
+            if (data && (data.items || data.other)) processJsonData(data);
+        }).catch(() => {});
+        return response;
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', createQuote);
+    } else {
+        createQuote();
+    }
 })();
