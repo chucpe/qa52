@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Калькулейшин
-// @namespace    Калькулейшин
-// @version      2.80
+// @name         Калькулейшн
+// @namespace    Калькулейшн
+// @version      2.81
 // @description  Подсчёт паллет/суммы + реальное время + фильтр по датам + настройки + фиолетовые заявки + цены + статистика
 // @match        https://e8.ffa.su/*
 // @grant        GM_xmlhttpRequest
@@ -378,7 +378,7 @@
     const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
 
     const TIMES_KEY = 'e8_pallet_times';
-    // ИСПРАВЛЕНО: e8.ffa.su (не backoffice) — проверено вручную, отдаёт 200
+    // Собираем информацию о времени потраченного на паллеты
     const API_BASE = 'https://backoffice-e8.ffa.su';
     const CONCURRENCY = 5;
 
@@ -466,7 +466,7 @@
                 return;
             }
 
-            // ИСПРАВЛЕНО: путь через e8.ffa.su + ?back=
+            // Путь через e8.ffa.su + ?back=
             const url = `${API_BASE}/api/v1/admin/projects/1/jobs/${palletId}`;
             GM_xmlhttpRequest({
                 method: 'GET',
@@ -647,6 +647,32 @@
 
   const FORMULA = (holes, pallets) =>
     round2(holes * settings.rate * (1 - settings.tax / 100) * pallets);
+
+      // ===== Исключения для отдельных позиций =====
+  // Б002<ЦВЕТ> — ставка 0.50 ₽/отверстие, без НДФЛ
+  const B002_COLORS = ['Бетон', 'Сонома', 'Молочный', 'Графит', 'Белый', 'Красный'];
+  const B002_RATE = 0.50;
+
+  function getSpecialRule(label) {
+    const clean = String(label || '').trim();
+    if (!clean.startsWith('Б002')) return null;
+    const rest = clean.slice(4);
+    for (const color of B002_COLORS) {
+      if (rest.startsWith(color)) {
+        return { prefix: 'Б002' + color, rate: B002_RATE, taxFree: true };
+      }
+    }
+    return null;
+  }
+
+  function calcSum(label, holes, pallets) {
+    if (holes == null) return 0;
+    const rule = getSpecialRule(label);
+    if (rule) {
+      return round2(holes * rule.rate * pallets);
+    }
+    return round2(holes * settings.rate * (1 - settings.tax / 100) * pallets);
+  }
 
   const log = (...a) => console.log('%c[e8-calc]', 'color:#09f;font-weight:bold', ...a);
 
@@ -863,15 +889,19 @@
             continue;
           }
 
-          const sum = FORMULA(holes, palletsInRange);
+          const sum = calcSum(label, holes, palletsInRange);
           totalPallets += palletsInRange;
           totalSum = round2(totalSum + sum);
           orderStat.pallets += palletsInRange;
           orderStat.sum = round2(orderStat.sum + sum);
 
-          // Статистика — с защитой по palletId
+         // Статистика — с защитой по palletId
+
           if (window.__e8Stats && window.__e8Stats.accumulate) {
-              const earnPerPallet = holes * settings.rate * (1 - settings.tax / 100);
+              const rule = getSpecialRule(label);
+              const earnPerPallet = rule
+                  ? holes * rule.rate
+                  : holes * settings.rate * (1 - settings.tax / 100);
               for (let i = 0; i < palletsInRange; i++) {
                   const child = childList[i] || null;
                   const palletId = child?.id || null;
@@ -1439,6 +1469,14 @@
   const DECOR_ATTR = 'data-price-decorated';
   const RATE = 0.48;
   const TAX_MULTIPLIER = 0.87;
+  const B002_COLORS = ['Бетон', 'Сонома', 'Молочный', 'Графит', 'Белый', 'Красный'];
+  const B002_RATE = 0.50;
+
+  function isB002Color(name) {
+    if (!name.startsWith('Б002')) return false;
+    const rest = name.slice(4);
+    return B002_COLORS.some(c => rest.startsWith(c));
+  }
   const PRICE_COLOR = '#7dd87d';
   let priceByName = {};
   let priceLoaded = false;
@@ -1454,10 +1492,21 @@
             const data = JSON.parse(resp.responseText);
             if (!Array.isArray(data)) throw new Error('not array');
             priceByName = {};
-            data.forEach(item => {
+                        data.forEach(item => {
               if (!item || !item.name) return;
               if (typeof item.holes !== 'number') return;
-              priceByName[item.name.trim()] = item.holes * RATE * TAX_MULTIPLIER;
+
+              const name = item.name.trim();
+              let price;
+
+              if (isB002Color(name)) {
+                // Б002<цвет>: ставка 0.50 ₽ за отверстие, без НДФЛ
+                price = item.holes * B002_RATE;
+              } else {
+                // Обычная формула с НДФЛ
+                price = item.holes * RATE * TAX_MULTIPLIER;
+              }
+              priceByName[name] = price;
             });
             priceLoaded = true;
             resolve(true);
