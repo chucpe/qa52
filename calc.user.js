@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Калькулейшин
 // @namespace    Калькулейшин
-// @version      2.78
+// @version      2.79
 // @description  Подсчёт паллет/суммы + реальное время + фильтр по датам + настройки + фиолетовые заявки + цены + статистика
 // @match        https://e8.ffa.su/*
 // @grant        GM_xmlhttpRequest
@@ -266,7 +266,7 @@
         return html;
     }
 
-    function ensureStatsPanel() {
+        function ensureStatsPanel() {
         let panel = document.getElementById('e8-stats-panel');
         if (panel) return panel;
 
@@ -282,11 +282,20 @@
             font-size:12px;
             max-height:400px;
             overflow-y:auto;
+            position:relative;
+            z-index:10;
+            width:100%;
+            box-sizing:border-box;
         `;
 
-        const statsBtn = document.getElementById('e8-calc-stats-toggle');
-        if (statsBtn && statsBtn.parentElement) {
-            statsBtn.parentElement.insertBefore(panel, statsBtn);
+        // Вставляем панель ВНУТРЬ #e8-calc-box, перед кнопкой "Свернуть"
+        const box = document.getElementById('e8-calc-box');
+        const minimizeBtn = document.getElementById('e8-calc-minimize');
+
+        if (box && minimizeBtn) {
+            box.insertBefore(panel, minimizeBtn);
+        } else if (box) {
+            box.appendChild(panel);
         } else {
             document.body.appendChild(panel);
         }
@@ -325,7 +334,7 @@
         }
     }
 
-    function attachToButton() {
+            function attachToButton() {
         const btn = document.getElementById('e8-calc-stats-toggle');
         if (!btn || btn.dataset.e8StatsBound === '1') return;
         btn.dataset.e8StatsBound = '1';
@@ -960,7 +969,8 @@
     #e8-calc-box .pal-sep{border-top:1px dashed #333;margin:4px 0}
     #e8-calc-box .unk-reason{font-size:10px;color:#ffb86c;opacity:.9}
 
-    #e8-calc-dates,#e8-calc-settings{display:none;margin-top:8px;padding-top:8px;border-top:1px dashed #444}
+    #e8-calc-dates,#e8-calc-settings,#e8-stats-panel{display:none;margin-top:8px;padding-top:8px;border-top:1px dashed #444}
+    #e8-stats-panel{background:#161622;border-left:2px solid #334155;border-radius:0 4px 4px 0;padding:6px 8px;font-size:12px;max-height:400px;overflow-y:auto;box-sizing:border-box}
     #e8-calc-dates label,#e8-calc-settings label{display:block;font-size:11px;opacity:.8;margin:4px 0 2px}
     #e8-calc-dates input,#e8-calc-settings input{width:100%;box-sizing:border-box;background:#0f172a;color:#eee;border:1px solid #334155;border-radius:5px;padding:4px 6px;font:12px system-ui;color-scheme:dark}
     #e8-calc-dates .btns,#e8-calc-settings .btns{display:flex;gap:6px;margin-top:8px}
@@ -1053,6 +1063,10 @@
           <input type="checkbox" id="e8-automin" ${settings.autoMinimize ? 'checked' : ''}>
           Автоматически сворачивать после загрузки
         </label>
+        <div style="display:flex;justify-content:space-between;font-size:11px;opacity:.85;margin-top:8px;">
+          <span>localStorage:</span>
+          <span id="e8-storage-info" style="font-weight:600;">— MB / —%</span>
+        </div>
 
         <div class="btns">
           <button id="e8-settings-apply">Применить</button>
@@ -1060,6 +1074,7 @@
         </div>
       </div>
 
+      <div id="e8-stats-panel" style="display:none;"></div>
       <button id="e8-calc-toggle">Считать по датам</button>
       <button id="e8-calc-recalc" class="secondary">Пересчитать</button>
       <div class="btn-row">
@@ -1069,7 +1084,7 @@
       <button id="e8-calc-minimize" class="secondary">Свернуть</button>
     `;
         // Функция для безопасной вставки
-    function safeAppend() {
+            function safeAppend() {
         if (!document.body) {
             setTimeout(safeAppend, 50);
             return;
@@ -1088,12 +1103,9 @@
             mini.addEventListener('click', () => setMinimized(false));
         }
 
-        // Принудительно применяем адаптивность после вставки
         applyAdaptiveLayout();
     }
 
-    // Запускаем вставку с небольшой задержкой, чтобы сайт успел отрисоваться
-    // 300-500мс обычно достаточно для SPA
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
         setTimeout(safeAppend, 300);
     } else {
@@ -1107,6 +1119,19 @@
       const visible = datesPanel.style.display === 'block';
       datesPanel.style.display = visible ? 'none' : 'block';
       settingsPanel.style.display = 'none';
+      const statsPanel = document.getElementById('e8-stats-panel');
+      if (statsPanel) statsPanel.style.display = 'none';
+
+      // Сбрасываем галочки у других кнопок
+      const statsBtn = document.getElementById('e8-calc-stats-toggle');
+      if (statsBtn) statsBtn.textContent = 'Статистика';
+      const settingsBtn = document.getElementById('e8-calc-settings-toggle');
+      if (settingsBtn) settingsBtn.textContent = 'Настройка';
+
+      // Ставим/снимаем галочку у себя
+      box.querySelector('#e8-calc-toggle').textContent = visible
+        ? 'Считать по датам'
+        : 'Считать по датам ✓';
     });
 
     box.querySelector('#e8-date-apply').addEventListener('click', () => {
@@ -1125,10 +1150,23 @@
       if (lastJson) processJobs(lastJson);
     });
 
-    box.querySelector('#e8-calc-settings-toggle').addEventListener('click', () => {
+        box.querySelector('#e8-calc-settings-toggle').addEventListener('click', () => {
       const visible = settingsPanel.style.display === 'block';
       settingsPanel.style.display = visible ? 'none' : 'block';
       datesPanel.style.display = 'none';
+      const statsPanel = document.getElementById('e8-stats-panel');
+      if (statsPanel) statsPanel.style.display = 'none';
+
+      // Сбрасываем галочки у других кнопок
+      const statsBtn = document.getElementById('e8-calc-stats-toggle');
+      if (statsBtn) statsBtn.textContent = 'Статистика';
+      box.querySelector('#e8-calc-toggle').textContent = 'Считать по датам';
+
+      // Ставим/снимаем галочку у себя
+      box.querySelector('#e8-calc-settings-toggle').textContent = visible
+        ? 'Настройка'
+        : 'Настройка ✓';
+    if (!visible) renderStorageInfo();
     });
 
     const opRange = box.querySelector('#e8-op-range');
@@ -1330,7 +1368,6 @@
       <div class="row"><span>Сумма:</span><span class="val sum">${money(totalSum)}</span></div>
       ${filterLine}
       <div id="e8-calc-orders" style="${ordersHtml ? '' : 'display:none;'}">${ordersHtml ? `<div class="ord">${ordersHtml}</div>` : ''}</div>
-      <div id="e8-stats-panel" style="display:none;"></div>
     `;
 
     body.querySelectorAll('.ord-head, .row.clickable').forEach(head => {
@@ -1726,3 +1763,35 @@
     style.textContent = css;
     document.head.appendChild(style);
 })();
+  // ===== Информер localStorage =====
+  const STORAGE_LIMIT_MB = 5; // ~5 MB стандартный лимит браузера
+
+  function getTotalLocalStorageBytes() {
+    let total = 0;
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+        const v = localStorage.getItem(k) || '';
+        // UTF-16: 2 байта на символ
+        total += (k.length + v.length) * 2;
+      }
+    } catch (e) {}
+    return total;
+  }
+
+  function renderStorageInfo() {
+    const el = document.getElementById('e8-storage-info');
+    if (!el) return;
+
+    const bytes = getTotalLocalStorageBytes();
+    const mb = bytes / 1024 / 1024;
+    const percent = Math.min(100, (mb / STORAGE_LIMIT_MB) * 100);
+
+    el.textContent = `${mb.toFixed(2)} MB / ${percent.toFixed(1)}%`;
+
+    // Цвет в зависимости от заполнения
+    if (percent < 50) el.style.color = '#7CFC9B';       // зелёный
+    else if (percent < 80) el.style.color = '#fbbf24';  // жёлтый
+    else el.style.color = '#ff5555';                    // красный
+  }
