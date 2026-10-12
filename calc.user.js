@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Калькулейшин
 // @namespace    Калькулейшин
-// @version      2.77
+// @version      2.78
 // @description  Подсчёт паллет/суммы + реальное время + фильтр по датам + настройки + фиолетовые заявки + цены + статистика
 // @match        https://e8.ffa.su/*
 // @grant        GM_xmlhttpRequest
@@ -931,7 +931,7 @@
   }
 
   GM_addStyle(`
-    #e8-calc-box{position:fixed;right:20px;bottom:20px;left:auto;z-index:999999;width:360px;max-width:calc(100vw - 24px);box-sizing:border-box;background:#1e1e2e;color:#eee;border:1px solid #444;border-radius:10px;font:13px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.5);padding:12px 14px}
+    #e8-calc-box{position:fixed;right:20px;bottom:20px;left:auto;z-index:2147483647;width:360px;max-width:calc(100vw - 24px);box-sizing:border-box;background:#1e1e2e;color:#eee;border:1px solid #444;border-radius:10px;font:13px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.5);padding:12px 14px;pointer-events:auto}
     #e8-calc-box.hidden{display:none}
     #e8-calc-box .btn-row{display:flex;gap:6px;margin-top:8px}
     #e8-calc-box .btn-row button{margin-top:0;flex:1;width:auto}
@@ -1068,15 +1068,36 @@
       </div>
       <button id="e8-calc-minimize" class="secondary">Свернуть</button>
     `;
-    document.body.appendChild(box);
+        // Функция для безопасной вставки
+    function safeAppend() {
+        if (!document.body) {
+            setTimeout(safeAppend, 50);
+            return;
+        }
+        // Проверяем, не вставили ли уже (на случай повторных вызовов)
+        if (!document.getElementById('e8-calc-box')) {
+            document.body.appendChild(box);
+        }
 
-    let mini = document.getElementById('e8-calc-mini');
-    if (!mini) {
-      mini = document.createElement('button');
-      mini.id = 'e8-calc-mini';
-      mini.title = 'Развернуть подсчёт';
-      document.body.appendChild(mini);
-      mini.addEventListener('click', () => setMinimized(false));
+        let mini = document.getElementById('e8-calc-mini');
+        if (!mini) {
+            mini = document.createElement('button');
+            mini.id = 'e8-calc-mini';
+            mini.title = 'Развернуть подсчёт';
+            document.body.appendChild(mini);
+            mini.addEventListener('click', () => setMinimized(false));
+        }
+
+        // Принудительно применяем адаптивность после вставки
+        applyAdaptiveLayout();
+    }
+
+    // Запускаем вставку с небольшой задержкой, чтобы сайт успел отрисоваться
+    // 300-500мс обычно достаточно для SPA
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        setTimeout(safeAppend, 300);
+    } else {
+        window.addEventListener('DOMContentLoaded', () => setTimeout(safeAppend, 300));
     }
 
     const datesPanel = box.querySelector('#e8-calc-dates');
