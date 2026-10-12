@@ -1,18 +1,601 @@
 // ==UserScript==
 // @name         Калькулейшин
 // @namespace    Калькулейшин
-// @version      2.72
-// @description  Подсчёт паллет/суммы + фильтр по датам + настройки + фиолетовые «Заявка №» + подписи цен
+// @version      2.77
+// @description  Подсчёт паллет/суммы + реальное время + фильтр по датам + настройки + фиолетовые заявки + цены + статистика
 // @match        https://e8.ffa.su/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
+// @connect      e8.ffa.su
+// @connect      backoffice-e8.ffa.su
 // @run-at       document-start
 // @downloadURL https://raw.githubusercontent.com/chucpe/qa52/master/calc.user.js
 // @updateURL   https://raw.githubusercontent.com/chucpe/qa52/master/calc.user.js
 // ==/UserScript==
 
+// ==================================================================
+// ОБЩЕЕ ХРАНИЛИЩЕ — токен Bearer
+// ==================================================================
+(function() {
+    'use strict';
+    const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+
+    function loadTokenFromStorage() {
+        try {
+            const t = localStorage.getItem('auth_token');
+            if (t && /^eyJ/.test(t)) {
+                W.__e8Token = /^Bearer\s+/i.test(t) ? t : ('Bearer ' + t);
+                try { window.__e8Token = W.__e8Token; } catch (e) {}
+                return W.__e8Token;
+            }
+        } catch (e) {}
+        return null;
+    }
+
+    W.__e8Token = loadTokenFromStorage() || W.__e8Token || null;
+    try { window.__e8Token = W.__e8Token; } catch (e) {}
+
+    setInterval(loadTokenFromStorage, 2000);
+
+    function patchFetch(target) {
+        if (!target || !target.fetch || target.__e8TokenPatched) return;
+        target.__e8TokenPatched = true;
+        const orig = target.fetch;
+        target.fetch = async function (...args) {
+            try {
+                const opts = typeof args[1] === 'object' ? args[1] : {};
+                const headers = opts?.headers || (typeof args[0] === 'object' ? args[0]?.headers : null);
+                if (headers) {
+                    let auth = null;
+                    if (headers instanceof Headers) {
+                        auth = headers.get('Authorization') || headers.get('authorization');
+                    } else if (typeof headers === 'object') {
+                        for (const k of Object.keys(headers)) {
+                            if (/^authorization$/i.test(k)) { auth = headers[k]; break; }
+                        }
+                    }
+                    if (auth && /^Bearer\s+/i.test(auth)) {
+                        W.__e8Token = auth;
+                        try { window.__e8Token = auth; } catch (e) {}
+                    }
+                }
+            } catch (e) {}
+            return orig.apply(this, args);
+        };
+    }
+    try { patchFetch(W); } catch (e) {}
+    try { if (W !== window) patchFetch(window); } catch (e) {}
+    try { patchFetch(globalThis); } catch (e) {}
+})();
+
+
+// ==================================================================
+// МОДУЛЬ СТАТИСТИКИ
+// ==================================================================
+(function() {
+    'use strict';
+
+    const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+
+    const STATS_KEY = 'e8_stats_by_product';
+    const SEEN_KEY  = 'e8_seen_pallets';
+
+    let stats = {};
+    let seenPallets = [];
+
+    function loadStats() {
+        try {
+            const raw = localStorage.getItem(STATS_KEY);
+            if (raw) {
+                const s = JSON.parse(raw);
+                if (s && typeof s === 'object') stats = s;
+            }
+        } catch (e) {}
+    }
+    function saveStats() {
+        try { localStorage.setItem(STATS_KEY, JSON.stringify(stats)); } catch (e) {}
+    }
+
+    function loadSeen() {
+        try {
+            const raw = localStorage.getItem(SEEN_KEY);
+            if (raw) {
+                const arr = JSON.parse(raw);
+                if (Array.isArray(arr)) seenPallets = arr;
+            }
+        } catch (e) {}
+    }
+    function saveSeen() {
+        try {
+            // Не даём разростись больше 20000 записей
+            if (seenPallets.length > 20000) seenPallets = seenPallets.slice(-20000);
+            localStorage.setItem(SEEN_KEY, JSON.stringify(seenPallets));
+        } catch (e) {}
+    }
+    function isSeen(id) {
+        if (!id) return false;
+        return seenPallets.indexOf(id) !== -1;
+    }
+    function markSeen(id) {
+        if (!id) return;
+        if (seenPallets.indexOf(id) === -1) seenPallets.push(id);
+    }
+
+    // Базовая статистика: защищена от двойного счёта по palletId
+    function accumulateBase(label, holes, earn, palletId) {
+        if (!label) return;
+
+        // Если palletId передан и уже видели — пропускаем
+        if (palletId) {
+            if (isSeen(palletId)) return;
+            markSeen(palletId);
+            saveSeen();
+        }
+
+        if (!stats[label]) stats[label] = { holes: 0, earn: 0, count: 0, hours: 0 };
+        const s = stats[label];
+        if (typeof s.hours !== 'number') s.hours = 0;
+        s.holes += Number(holes) || 0;
+        s.earn  += Number(earn) || 0;
+        s.count += 1;
+        saveStats();
+    }
+
+    function addHours(label, hours) {
+        if (!label || !hours || hours <= 0) return;
+        if (!stats[label]) stats[label] = { holes: 0, earn: 0, count: 0, hours: 0 };
+        if (typeof stats[label].hours !== 'number') stats[label].hours = 0;
+        stats[label].hours += Number(hours) || 0;
+        saveStats();
+        console.log('[time] addHours:', label, hours.toFixed(2));
+    }
+
+    W.__e8Stats = { accumulate: accumulateBase, addHours };
+    try { window.__e8Stats = W.__e8Stats; } catch (e) {}
+
+    let progress = { active: false, done: 0, total: 0 };
+
+    function setProgress(active, done, total) {
+        progress.active = active;
+        progress.done = done;
+        progress.total = total;
+        renderStats();
+    }
+
+    function formatHours(h) {
+        if (!h || h <= 0) return '0м';
+        const totalMinutes = Math.round(h * 60);
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        if (hours === 0) return `${minutes}м`;
+        if (minutes === 0) return `${hours}ч`;
+        return `${hours}ч ${minutes}м`;
+    }
+
+    function buildStatsHTML() {
+        const items = Object.entries(stats);
+
+        let totalEarn = 0, totalCount = 0, totalHours = 0;
+        for (const [, s] of items) {
+            totalEarn  += s.earn || 0;
+            totalCount += s.count || 0;
+            totalHours += s.hours || 0;
+        }
+
+        const top = items
+            .map(([label, s]) => ({
+                label,
+                holes: s.holes || 0,
+                earn: s.earn || 0,
+                count: s.count || 0,
+                hours: s.hours || 0,
+            }))
+            .sort((a, b) => b.holes - a.holes)
+            .slice(0, 10);
+
+        const money = (n) => (Math.round(n * 100) / 100).toLocaleString('ru-RU', {
+            minimumFractionDigits: 2, maximumFractionDigits: 2
+        }) + ' ₽';
+
+        let html = `
+            <div style="padding-top:6px;border-top:1px dashed #444;margin-top:6px;">
+                <div style="display:flex;justify-content:space-between;color:#7CFC9B;font-weight:700;">
+    <span>Заработок:</span>
+    <span>${money(totalEarn)}</span>
+</div>
+<div style="display:flex;justify-content:space-between;color:#fbbf24;font-weight:700;margin-top:2px;">
+    <span>Время:</span>
+    <span>${formatHours(totalHours)}</span>
+</div>
+<div style="display:flex;justify-content:space-between;color:#a78bfa;font-weight:700;margin-top:2px;">
+    <span>Паллет:</span>
+    <span>${totalCount}</span>
+</div>
+                ${progress.active ? `
+                <div style="margin-top:6px;font-size:11px;color:#60a5fa;">
+                    Загружаем время: ${progress.done} / ${progress.total}…
+                </div>` : ''}
+                <div style="margin-top:8px;font-size:11px;opacity:.7;">Топ-10 позиций (по отверстиям):</div>
+            </div>
+        `;
+
+        if (top.length === 0) {
+            html += `<div style="font-size:11px;opacity:.6;margin-top:4px;">Пока нет данных</div>`;
+        } else {
+            top.forEach((t, i) => {
+                const idx = i + 1;
+                html += `
+                    <div style="
+                        display:flex;
+                        justify-content:space-between;
+                        gap:8px;
+                        padding:3px 0;
+                        font-size:11px;
+                        border-top:1px solid #2a2a3e;
+                        margin-top:2px;
+                    ">
+                        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                            <b>${idx}.</b> ${t.label}
+                        </span>
+                        <span style="text-align:right;white-space:nowrap;">
+    <span style="color:#60a5fa;">${t.holes} отв</span>
+    · <span style="color:#fbbf24;">${formatHours(t.hours)}</span>
+    · <span style="color:#7CFC9B;">${money(t.earn)}</span>
+</span>
+                    </div>
+                `;
+            });
+        }
+
+        html += `
+            <button id="e8-stats-clear" style="
+                margin-top:10px;
+                width:100%;
+                cursor:pointer;
+                background:#ef4444;
+                color:#fff;
+                border:0;
+                border-radius:5px;
+                padding:4px 8px;
+                font:600 11px system-ui,sans-serif;
+            ">Очистить статистику</button>
+        `;
+
+        return html;
+    }
+
+    function ensureStatsPanel() {
+        let panel = document.getElementById('e8-stats-panel');
+        if (panel) return panel;
+
+        panel = document.createElement('div');
+        panel.id = 'e8-stats-panel';
+        panel.style.cssText = `
+            display:none;
+            margin-top:6px;
+            background:#161622;
+            border-left:2px solid #334155;
+            border-radius:0 4px 4px 0;
+            padding:6px 8px;
+            font-size:12px;
+            max-height:400px;
+            overflow-y:auto;
+        `;
+
+        const statsBtn = document.getElementById('e8-calc-stats-toggle');
+        if (statsBtn && statsBtn.parentElement) {
+            statsBtn.parentElement.insertBefore(panel, statsBtn);
+        } else {
+            document.body.appendChild(panel);
+        }
+
+        return panel;
+    }
+
+    function renderStats() {
+        let panel = document.getElementById('e8-stats-panel');
+        if (!panel) panel = ensureStatsPanel();
+        if (!panel) return;
+        panel.innerHTML = buildStatsHTML();
+
+        const clearBtn = panel.querySelector('#e8-stats-clear');
+        if (clearBtn) {
+            let clearArmed = false;
+            clearBtn.addEventListener('click', () => {
+                if (!clearArmed) {
+                    clearArmed = true;
+                    clearBtn.textContent = 'Нажмите ещё раз для очистки';
+                    clearBtn.style.background = '#b91c1c';
+                    setTimeout(() => {
+                        clearArmed = false;
+                        clearBtn.textContent = 'Очистить статистику';
+                        clearBtn.style.background = '#ef4444';
+                    }, 3000);
+                    return;
+                }
+                stats = {};
+                seenPallets = [];
+                saveStats();
+                saveSeen();
+                try { localStorage.removeItem('e8_pallet_times'); } catch (e) {}
+                panel.innerHTML = buildStatsHTML();
+            });
+        }
+    }
+
+    function attachToButton() {
+        const btn = document.getElementById('e8-calc-stats-toggle');
+        if (!btn || btn.dataset.e8StatsBound === '1') return;
+        btn.dataset.e8StatsBound = '1';
+
+        btn.addEventListener('click', () => {
+            const panel = ensureStatsPanel();
+            const orders = document.getElementById('e8-calc-orders');
+            if (!panel) return;
+
+            const statsVisible = panel.style.display === 'block';
+
+            if (statsVisible) {
+                panel.style.display = 'none';
+                if (orders) orders.style.display = '';
+                btn.textContent = 'Статистика';
+            } else {
+                renderStats();
+                panel.style.display = 'block';
+                if (orders) orders.style.display = 'none';
+                btn.textContent = 'Статистика ✓';
+            }
+        });
+    }
+
+    loadStats();
+    loadSeen();
+    attachToButton();
+    setInterval(attachToButton, 1000);
+
+    W.__e8StatsUI = { renderStats, setProgress };
+    try { window.__e8StatsUI = W.__e8StatsUI; } catch (e) {}
+})();
+
+
+// ==================================================================
+// МОДУЛЬ СБОРА ВРЕМЕНИ (через /jobs/{id}/info)
+// ==================================================================
+(function() {
+    'use strict';
+
+    const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+
+    const TIMES_KEY = 'e8_pallet_times';
+    // ИСПРАВЛЕНО: e8.ffa.su (не backoffice) — проверено вручную, отдаёт 200
+    const API_BASE = 'https://backoffice-e8.ffa.su';
+    const CONCURRENCY = 5;
+
+    let timesCache = {};
+
+    function loadTimes() {
+        try {
+            const raw = localStorage.getItem(TIMES_KEY);
+            if (raw) {
+                const t = JSON.parse(raw);
+                if (t && typeof t === 'object') timesCache = t;
+            }
+        } catch (e) {}
+    }
+    function saveTimes() {
+        try { localStorage.setItem(TIMES_KEY, JSON.stringify(timesCache)); } catch (e) {}
+    }
+
+    function collectPallets(json) {
+        const products = json?.other?.dictionary?.products
+                      || json?.data?.other?.dictionary?.products
+                      || [];
+        const productMap = new Map(products.map(p => [p.id, p.label]));
+
+        const result = [];
+        const items = json?.items || json?.data?.items;
+        if (!Array.isArray(items)) {
+            console.log('[time] collectPallets: items НЕ массив', items);
+            return result;
+        }
+
+        for (const order of items) {
+            for (const group of (order.children || [])) {
+                const productId = group.productId;
+                const label = productMap.get(productId) || productId || '—';
+
+                for (const wp of (group.children || [])) {
+                    for (const pallet of (wp.children || [])) {
+                        const palletId = pallet?.id;
+                        if (!palletId) continue;
+                        result.push({
+                            palletId,
+                            productId,
+                            label,
+                            cancelDateTime: pallet?.cancelDateTime || null,
+                        });
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    function parseInfoResponse(text) {
+        try {
+            const j = JSON.parse(text);
+            const start = j?.startDateTime || j?.data?.startDateTime;
+            const end = j?.cancelDateTime || j?.data?.cancelDateTime;
+            if (!start || !end) return null;
+            const t1 = new Date(start).getTime();
+            const t2 = new Date(end).getTime();
+            if (isNaN(t1) || isNaN(t2) || t2 <= t1) return null;
+            return (t2 - t1) / (1000 * 60 * 60);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function fetchPalletHours(palletId) {
+        return new Promise((resolve) => {
+            let token = W.__e8Token || (typeof window !== 'undefined' ? window.__e8Token : null);
+            if (!token) {
+                try {
+                    const t = localStorage.getItem('auth_token');
+                    if (t && /^eyJ/.test(t)) {
+                        token = /^Bearer\s+/i.test(t) ? t : ('Bearer ' + t);
+                        W.__e8Token = token;
+                        try { window.__e8Token = token; } catch (e) {}
+                    }
+                } catch (e) {}
+            }
+            if (!token) {
+                console.log('[time] нет токена');
+                resolve({ ok: false, reason: 'no-token' });
+                return;
+            }
+
+            // ИСПРАВЛЕНО: путь через e8.ffa.su + ?back=
+            const url = `${API_BASE}/api/v1/admin/projects/1/jobs/${palletId}`;
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url,
+                headers: {
+                    'Accept': 'application/json',
+                    'Authorization': token,
+                },
+                onload: (res) => {
+                    if (res.status !== 200) {
+                        console.log('[time] status', res.status, 'для', palletId);
+                        resolve({ ok: false, reason: 'status-' + res.status });
+                        return;
+                    }
+                    const hours = parseInfoResponse(res.responseText);
+                    if (hours === null) {
+                        console.log('[time] parse fail для', palletId, res.responseText.slice(0, 200));
+                        resolve({ ok: false, reason: 'parse' });
+                        return;
+                    }
+                    resolve({ ok: true, hours });
+                },
+                onerror: () => { console.log('[time] network err'); resolve({ ok: false, reason: 'network' }); },
+                ontimeout: () => { console.log('[time] timeout'); resolve({ ok: false, reason: 'timeout' }); },
+                timeout: 15000,
+            });
+        });
+    }
+
+    let processing = false;
+
+    async function processPallets(json) {
+        if (processing) return;
+        processing = true;
+
+        loadTimes();
+
+        const all = collectPallets(json);
+        if (all.length === 0) { processing = false; return; }
+
+        const newPallets = all.filter(p => !timesCache[p.palletId]);
+
+        const total = newPallets.length;
+        let done = 0;
+
+        if (W.__e8StatsUI?.setProgress) {
+            W.__e8StatsUI.setProgress(true, 0, total);
+        }
+
+        const queue = newPallets.slice();
+        const workers = [];
+        for (let i = 0; i < Math.min(CONCURRENCY, queue.length); i++) {
+            workers.push(worker(queue, () => {
+                done++;
+                if (W.__e8StatsUI?.setProgress) {
+                    W.__e8StatsUI.setProgress(true, done, total);
+                }
+            }));
+        }
+        await Promise.all(workers);
+
+        if (W.__e8StatsUI?.setProgress) {
+            W.__e8StatsUI.setProgress(false, 0, 0);
+        }
+        if (W.__e8StatsUI?.renderStats) {
+            W.__e8StatsUI.renderStats();
+        }
+
+        processing = false;
+    }
+
+    async function worker(queue, onDone) {
+        while (queue.length) {
+            const item = queue.shift();
+            if (!item) break;
+
+            const res = await fetchPalletHours(item.palletId);
+            if (res.ok && res.hours > 0) {
+                timesCache[item.palletId] = {
+                    hours: res.hours,
+                    label: item.label,
+                    date: item.cancelDateTime || new Date().toISOString(),
+                };
+                saveTimes();
+
+                if (W.__e8Stats && W.__e8Stats.addHours) {
+                    W.__e8Stats.addHours(item.label, res.hours);
+                }
+            }
+            onDone();
+        }
+    }
+
+    function patchFetch(target) {
+        if (!target || !target.fetch || target.__e8TimePatched) return;
+        target.__e8TimePatched = true;
+        const orig = target.fetch;
+        target.fetch = async function (...args) {
+            const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+            const res = await orig.apply(this, args);
+            try {
+                if (url.includes('/jobs') && url.includes('statusId=2')) {
+                    res.clone().json().then(processPallets).catch((e) => console.log('[time] json err:', e));
+                }
+            } catch (e) {}
+            return res;
+        };
+    }
+    patchFetch(W);
+    if (W !== window) patchFetch(window);
+
+    const XHR = W.XMLHttpRequest || window.XMLHttpRequest;
+    if (XHR && !XHR.prototype.__e8TimePatched) {
+        XHR.prototype.__e8TimePatched = true;
+        const origOpen = XHR.prototype.open;
+        const origSend = XHR.prototype.send;
+        XHR.prototype.open = function (method, url, ...rest) {
+            this.__e8url = url;
+            return origOpen.call(this, method, url, ...rest);
+        };
+        XHR.prototype.send = function (...args) {
+            this.addEventListener('load', function () {
+                try {
+                    const url = this.__e8url || '';
+                    if (url.includes('/jobs') && url.includes('statusId=2')) {
+                        processPallets(JSON.parse(this.responseText));
+                    }
+                } catch (e) {}
+            });
+            return origSend.apply(this, args);
+        };
+    }
+})();
+
+
+// ==================================================================
+// ОСНОВНОЙ МОДУЛЬ КАЛЬКУЛЯТОРА
+// ==================================================================
 (function () {
   'use strict';
 
@@ -71,22 +654,17 @@
   }
   const escapeAttr = escapeHtml;
 
-  // ---------- фильтр по номерам заявок ----------
   function parseOrderFilter(str) {
     const s = String(str || '').trim();
     if (!s) return null;
-
     const m = s.match(/^(\d+)\s*[-–—]\s*(\d+)$/);
     if (m) {
       const a = Number(m[1]), b = Number(m[2]);
       return { type: 'range', from: Math.min(a, b), to: Math.max(a, b) };
     }
-
     const parts = s.split(/[,\s;]+/).filter(Boolean);
     if (parts.length) {
-      const nums = parts
-        .map(x => Number(String(x).replace(/\D/g, '')))
-        .filter(Number.isFinite);
+      const nums = parts.map(x => Number(String(x).replace(/\D/g, ''))).filter(Number.isFinite);
       if (nums.length) return { type: 'list', set: new Set(nums) };
     }
     return null;
@@ -102,7 +680,6 @@
     return true;
   }
 
-  // ---------- дата/время ----------
   function toMskString(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
@@ -138,13 +715,11 @@
     return utcMs - MSK_OFFSET_MIN * 60 * 1000;
   }
 
-  // ---------- нормализация ----------
   function normalize(s) {
     return String(s || '').toLowerCase().replace(/\s+/g, '').replace(/[«»"']/g, '').trim();
   }
   function baseName(s) { return normalize(s).replace(/\([^)]*\)/g, ''); }
 
-  // ---------- прайс ----------
   function loadPrice() {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
@@ -181,7 +756,6 @@
     return null;
   }
 
-  // ---------- обработка ----------
   function extractItems(json) {
     if (!json) return null;
     if (Array.isArray(json.items)) return json.items;
@@ -286,6 +860,16 @@
           orderStat.pallets += palletsInRange;
           orderStat.sum = round2(orderStat.sum + sum);
 
+          // Статистика — с защитой по palletId
+          if (window.__e8Stats && window.__e8Stats.accumulate) {
+              const earnPerPallet = holes * settings.rate * (1 - settings.tax / 100);
+              for (let i = 0; i < palletsInRange; i++) {
+                  const child = childList[i] || null;
+                  const palletId = child?.id || null;
+                  window.__e8Stats.accumulate(label, holes, earnPerPallet, palletId);
+              }
+          }
+
           debugRows.push({
             order: order.label, label, holes, pallets,
             palletsInRange, firstDate: toMskString(firstDateIso),
@@ -303,11 +887,9 @@
       debugRows, unknownDetails,
     };
     log('Результат:', lastResult);
-    console.table(debugRows);
     renderWindow();
   }
 
-  // ---------- перехват fetch/XHR ----------
   function patchFetch(target) {
     if (!target || !target.fetch || target.__e8patched) return;
     target.__e8patched = true;
@@ -348,10 +930,11 @@
     };
   }
 
-  // ---------- UI ----------
   GM_addStyle(`
     #e8-calc-box{position:fixed;right:20px;bottom:20px;left:auto;z-index:999999;width:360px;max-width:calc(100vw - 24px);box-sizing:border-box;background:#1e1e2e;color:#eee;border:1px solid #444;border-radius:10px;font:13px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.5);padding:12px 14px}
     #e8-calc-box.hidden{display:none}
+    #e8-calc-box .btn-row{display:flex;gap:6px;margin-top:8px}
+    #e8-calc-box .btn-row button{margin-top:0;flex:1;width:auto}
     #e8-calc-box .row{display:flex;justify-content:space-between;margin:4px 0}
     #e8-calc-box .row.clickable{cursor:pointer;border-radius:4px;padding:2px 4px;margin-left:-4px;margin-right:-4px}
     #e8-calc-box .row.clickable:hover{background:#2a2a3e}
@@ -390,15 +973,22 @@
     #e8-calc-mini{
       position:fixed;right:20px;bottom:20px;z-index:999999;
       width:46px;height:46px;border-radius:50%;
-      background:#3b82f6;color:#fff;border:0;
-      font:700 20px/1 system-ui,sans-serif;cursor:pointer;
+      border:0;cursor:pointer;
       box-shadow:0 4px 14px rgba(0,0,0,.5);
       display:flex;align-items:center;justify-content:center;
-      transition:background .15s, transform .1s;
+      transition:background-color .15s, transform .1s;
+      color:transparent;
+      background-color:#3b82f6;
+      background-image:
+        url('https://raw.githubusercontent.com/chucpe/qa52/master/icon.png'),
+        url('data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M18%207V4H6l6%208-6%208h12v-3%22%2F%3E%3C%2Fsvg%3E');
+      background-repeat: no-repeat, no-repeat;
+      background-position: center center, center center;
+      background-size: 26px 26px, 22px 22px;
     }
-    #e8-calc-mini:hover{background:#2563eb;transform:scale(1.05)}
+    #e8-calc-mini:hover{background-color:#2563eb;transform:scale(1.05)}
     #e8-calc-mini.hidden{display:none}
-  `);
+`);
 
   function applyAdaptiveLayout() {
     const box = document.getElementById('e8-calc-box');
@@ -472,7 +1062,10 @@
 
       <button id="e8-calc-toggle">Считать по датам</button>
       <button id="e8-calc-recalc" class="secondary">Пересчитать</button>
+      <div class="btn-row">
+      <button id="e8-calc-stats-toggle" class="secondary">Статистика</button>
       <button id="e8-calc-settings-toggle" class="secondary">Настройка</button>
+      </div>
       <button id="e8-calc-minimize" class="secondary">Свернуть</button>
     `;
     document.body.appendChild(box);
@@ -482,7 +1075,6 @@
       mini = document.createElement('button');
       mini.id = 'e8-calc-mini';
       mini.title = 'Развернуть подсчёт';
-      mini.textContent = 'Σ';
       document.body.appendChild(mini);
       mini.addEventListener('click', () => setMinimized(false));
     }
@@ -716,7 +1308,8 @@
       ${unknownHtml}
       <div class="row"><span>Сумма:</span><span class="val sum">${money(totalSum)}</span></div>
       ${filterLine}
-      ${ordersHtml ? `<div class="ord">${ordersHtml}</div>` : ''}
+      <div id="e8-calc-orders" style="${ordersHtml ? '' : 'display:none;'}">${ordersHtml ? `<div class="ord">${ordersHtml}</div>` : ''}</div>
+      <div id="e8-stats-panel" style="display:none;"></div>
     `;
 
     body.querySelectorAll('.ord-head, .row.clickable').forEach(head => {
@@ -741,11 +1334,10 @@
 })();
 
 // ==================================================================
-// МОДУЛЬ A. ФИОЛЕТОВЫЙ ЦВЕТ «Заявка №» НА СТРАНИЦЕ
+// МОДУЛЬ A. ФИОЛЕТОВЫЙ ЦВЕТ «Заявка №»
 // ==================================================================
 (function() {
   'use strict';
-
   const TARGET_SELECTOR = 'div.text-sm.font-semibold.break-all';
   const ZAYAVKA_PREFIX = 'Заявка №';
   const ZAYAVKA_COLOR = '#a855f7';
@@ -755,44 +1347,33 @@
       const text = (node.textContent || '').trim();
       if (!text.startsWith(ZAYAVKA_PREFIX)) return;
       if (node.dataset.zayavkaStyled === '1') return;
-
       const currentSize = parseFloat(getComputedStyle(node).fontSize) || 14;
       node.style.setProperty('font-size', (currentSize + 1) + 'px', 'important');
       node.style.setProperty('color', ZAYAVKA_COLOR, 'important');
       node.dataset.zayavkaStyled = '1';
     });
   }
-
   function start() {
     styleZayavki();
     const observer = new MutationObserver(() => styleZayavki());
-    observer.observe(document.body || document.documentElement, {
-      childList: true, subtree: true
-    });
+    observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
     setInterval(styleZayavki, 1000);
   }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', start);
-  } else {
-    start();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
 })();
 
 // ==================================================================
-// МОДУЛЬ B. ПОДПИСЬ ЦЕНЫ СПРАВА ОТ НАЗВАНИЯ (из price.json)
+// МОДУЛЬ B. ПОДПИСЬ ЦЕНЫ СПРАВА ОТ НАЗВАНИЯ
 // ==================================================================
 (function() {
   'use strict';
-
   const PRICE_URL = 'https://raw.githubusercontent.com/chucpe/qa52/master/src/price.json';
   const TARGET_SELECTOR = 'div.text-sm.font-semibold.break-all';
   const DECOR_ATTR = 'data-price-decorated';
-
   const RATE = 0.48;
   const TAX_MULTIPLIER = 0.87;
   const PRICE_COLOR = '#7dd87d';
-
   let priceByName = {};
   let priceLoaded = false;
 
@@ -803,8 +1384,6 @@
         url: PRICE_URL + '?t=' + Date.now(),
         onload: (resp) => {
           if (resp.status !== 200) { resolve(false); return; }
-          const trimmed = resp.responseText.trim();
-          if (!trimmed.startsWith('[') && !trimmed.startsWith('{')) { resolve(false); return; }
           try {
             const data = JSON.parse(resp.responseText);
             if (!Array.isArray(data)) throw new Error('not array');
@@ -824,28 +1403,15 @@
       });
     });
   }
-
-  function normalize(str) {
-    return (str || '').replace(/\s+/g, ' ').trim().toLowerCase();
-  }
-
+  function normalize(str) { return (str || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
   function findPriceByText(text) {
     const t = normalize(text);
     if (!t) return null;
-    for (const [name, price] of Object.entries(priceByName)) {
-      if (normalize(name) === t) return { name, price };
-    }
-    for (const [name, price] of Object.entries(priceByName)) {
-      const n = normalize(name);
-      if (n.startsWith(t + ' ')) return { name, price };
-    }
-    for (const [name, price] of Object.entries(priceByName)) {
-      const n = normalize(name);
-      if (t.startsWith(n + ' ')) return { name, price };
-    }
+    for (const [name, price] of Object.entries(priceByName)) if (normalize(name) === t) return { name, price };
+    for (const [name, price] of Object.entries(priceByName)) if (normalize(name).startsWith(t + ' ')) return { name, price };
+    for (const [name, price] of Object.entries(priceByName)) if (t.startsWith(normalize(name) + ' ')) return { name, price };
     return null;
   }
-
   function decorate() {
     if (!priceLoaded) return;
     document.querySelectorAll(TARGET_SELECTOR).forEach(node => {
@@ -854,7 +1420,6 @@
       if (!text) return;
       const match = findPriceByText(text);
       if (!match) return;
-
       const span = document.createElement('span');
       span.style.cssText = `color:${PRICE_COLOR}; font-weight:bold; margin-left:6px;`;
       span.textContent = `(${match.price.toFixed(2)})`;
@@ -862,33 +1427,27 @@
       node.setAttribute(DECOR_ATTR, '1');
     });
   }
-
   loadPrices().then((ok) => {
     if (!ok) return;
     decorate();
-
     const observer = new MutationObserver(() => decorate());
     observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
-
     let lastUrl = location.href;
     setInterval(() => {
-      if (location.href !== lastUrl) {
-        lastUrl = location.href;
-        setTimeout(decorate, 300);
-      }
+      if (location.href !== lastUrl) { lastUrl = location.href; setTimeout(decorate, 300); }
     }, 500);
   });
 })();
 
-//Установка приложения(скрываем баннер)
+// ==================================================================
+// УСТАНОВКА ПРИЛОЖЕНИЯ — СКРЫВАЕМ БАННЕР
+// ==================================================================
 (function() {
     'use strict';
-
     const DESCRIPTION_SELECTOR = 'div[data-slot="description"]';
     const DESCRIPTION_TEXT = 'Вы можете установить систему как приложение';
     const MARK = 'data-e8-banner-hidden';
 
-    // Найти ближайшего предка с fixed/sticky позицией — это и есть контейнер баннера
     function findBannerContainer(start) {
         let el = start;
         for (let i = 0; i < 8 && el; i++) {
@@ -896,114 +1455,68 @@
             if (st.position === 'fixed' || st.position === 'sticky') return el;
             el = el.parentElement;
         }
-        // fallback — родитель на 2 уровня выше
         return start.parentElement?.parentElement || start.parentElement || start;
     }
-
     function hideBanner() {
         document.querySelectorAll(DESCRIPTION_SELECTOR).forEach(node => {
             const text = (node.textContent || '').trim();
             if (!text.includes(DESCRIPTION_TEXT)) return;
-
             const container = findBannerContainer(node);
             if (!container || container.dataset.e8BannerHidden === '1') return;
-
             container.style.setProperty('display', 'none', 'important');
             container.setAttribute(MARK, '1');
         });
     }
-
     function start() {
         hideBanner();
-
         const observer = new MutationObserver(() => hideBanner());
-        observer.observe(document.body || document.documentElement, {
-            childList: true, subtree: true
-        });
-
+        observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
         setInterval(hideBanner, 500);
-
-        // Переинициализация observer при SPA-навигации
         const reobserve = () => {
             try { observer.disconnect(); } catch (e) {}
-            if (document.body) {
-                observer.observe(document.body, { childList: true, subtree: true });
-            }
+            if (document.body) observer.observe(document.body, { childList: true, subtree: true });
             hideBanner();
         };
-
         let lastHref = location.href;
         setInterval(() => {
-            if (location.href !== lastHref) {
-                lastHref = location.href;
-                reobserve();
-            }
+            if (location.href !== lastHref) { lastHref = location.href; reobserve(); }
         }, 300);
     }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', start);
-    } else {
-        start();
-    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
 })();
 
-//Скрываем баннер "Напоминание"
+// ==================================================================
+// СКРЫВАЕМ БАННЕР «Напоминание»
+// ==================================================================
 (function() {
     'use strict';
-
     const POPUP_TITLE = 'Напоминание';
-
     function closeReminderPopup() {
-        // Ищем всевозможные диалоги
-        const candidates = document.querySelectorAll(
-            'div.reka-dialog-content, div[role="dialog"], dialog[open]'
-        );
-
+        const candidates = document.querySelectorAll('div.reka-dialog-content, div[role="dialog"], dialog[open]');
         for (const dlg of candidates) {
             const text = (dlg.textContent || '');
             if (!text.includes(POPUP_TITLE)) continue;
-
-            // Пробуем 3 селектора кнопки закрытия
-            const selectors = [
-                'button[aria-label="Закрыть"]',
-                'button[data-slot="close"]',
-                'button[type="button"]'
-            ];
-
+            const selectors = ['button[aria-label="Закрыть"]', 'button[data-slot="close"]', 'button[type="button"]'];
             for (const sel of selectors) {
                 const btn = dlg.querySelector(sel);
-                if (btn && !btn.disabled) {
-                    btn.click();
-                    console.log('[calc] Закрыл попап через', sel);
-                    return; // выходим после первого успешного клика
-                }
+                if (btn && !btn.disabled) { btn.click(); return; }
             }
         }
     }
-
     function start() {
         closeReminderPopup();
-
         const observer = new MutationObserver(() => closeReminderPopup());
-        observer.observe(document.body || document.documentElement, {
-            childList: true,
-            subtree: true
-        });
-
+        observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
         setInterval(closeReminderPopup, 500);
     }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', start);
-    } else {
-        start();
-    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
 })();
 
-
-//Запрещаем открытие кнопки "Характеристика продукции"
-
+// ==================================================================
+// ЗАПРЕЩАЕМ ОТКРЫТИЕ КНОПКИ «Характеристика продукции»
+// ==================================================================
 (function() {
     'use strict';
     const style = document.createElement('style');
@@ -1025,16 +1538,14 @@
     (document.head || document.documentElement).appendChild(style);
 })();
 
-//Подсчет количества отверсий и диалоговое окно
-
+// ==================================================================
+// ПОДСЧЁТ КОЛИЧЕСТВА ОТВЕРСТИЙ И ЦИТАТА
+// ==================================================================
 (function() {
     'use strict';
-
     const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-
     const STORAGE_KEY_SUM    = 'e8_hole_counter_sum';
     const STORAGE_KEY_PALLET = 'e8_pallet_counter_sum';
-
     let totalSum = 0;
     let palletSum = 0;
     let waitingForCharData = false;
@@ -1051,33 +1562,17 @@
 
     function createQuote() {
         if (document.getElementById('hole-counter-quote')) return;
-
         const q = document.createElement('div');
         q.id = 'hole-counter-quote';
         q.style.cssText = `
-            position: fixed;
-            right: 20px;
-            bottom: 74px;
-            z-index: 999999;
-            background: #1e1e2e;
-            color: #eee;
-            border: 1px solid #444;
-            border-radius: 8px;
-            padding: 8px 26px 8px 12px;
-            font: 12px/1.4 system-ui, sans-serif;
-            box-shadow: 0 6px 18px rgba(0,0,0,.5);
-            min-width: 170px;
-            max-width: calc(100vw - 40px);
-            box-sizing: border-box;
-            display: none;
-            user-select: none;
+            position: fixed; right: 20px; bottom: 74px; z-index: 999999;
+            background: #1e1e2e; color: #eee; border: 1px solid #444; border-radius: 8px;
+            padding: 8px 26px 8px 12px; font: 12px/1.4 system-ui, sans-serif;
+            box-shadow: 0 6px 18px rgba(0,0,0,.5); min-width: 170px;
+            max-width: calc(100vw - 40px); box-sizing: border-box; display: none; user-select: none;
         `;
-
         q.innerHTML = `
-            <span id="hole-counter-quote-close" style="
-                position:absolute; top:4px; right:6px;
-                cursor:pointer; opacity:.6; font-size:14px; line-height:1;
-            " title="Закрыть">×</span>
+            <span id="hole-counter-quote-close" style="position:absolute; top:4px; right:6px; cursor:pointer; opacity:.6; font-size:14px; line-height:1;" title="Закрыть">×</span>
             <div style="display:flex; justify-content:space-between; gap:14px; color:#7CFC9B;">
                 <span>Заработок:</span>
                 <span id="hole-counter-earnings" style="font-weight:700;">0.00</span>
@@ -1086,56 +1581,30 @@
                 <span>Отверстий:</span>
                 <span id="hole-counter-value" style="font-weight:700;">0</span>
             </div>
-            <button id="hole-counter-reset" style="
-                margin-top:8px;
-                width:100%;
-                cursor:pointer;
-                background:#ef4444;
-                color:#fff;
-                border:0;
-                border-radius:5px;
-                padding:4px 8px;
-                font:600 11px system-ui,sans-serif;
-            ">Сброс</button>
+            <button id="hole-counter-reset" style="margin-top:8px; width:100%; cursor:pointer; background:#ef4444; color:#fff; border:0; border-radius:5px; padding:4px 8px; font:600 11px system-ui,sans-serif;">Сброс</button>
         `;
-
         document.body.appendChild(q);
-
-        q.querySelector('#hole-counter-quote-close').addEventListener('click', () => {
-            q.style.display = 'none';
-        });
-
+        q.querySelector('#hole-counter-quote-close').addEventListener('click', () => { q.style.display = 'none'; });
         q.querySelector('#hole-counter-reset').addEventListener('click', () => {
-            totalSum = 0;
-            palletSum = 0;
-            saveSum();
-            savePallet();
-            updateDisplay();
+            totalSum = 0; palletSum = 0; saveSum(); savePallet(); updateDisplay();
         });
-
         updateDisplay();
     }
 
     function updateDisplay() {
         const earningsSpan = document.getElementById('hole-counter-earnings');
         const valueSpan    = document.getElementById('hole-counter-value');
-        const step1 = totalSum * 0.48;
-        const step2 = step1 * 0.87;
-        if (earningsSpan) earningsSpan.textContent = step2.toFixed(2);
+        if (earningsSpan) earningsSpan.textContent = (totalSum * 0.48 * 0.87).toFixed(2);
         if (valueSpan)    valueSpan.textContent    = totalSum;
     }
-
     function showQuote() {
         const q = document.getElementById('hole-counter-quote');
-        if (!q) return;
-        q.style.display = 'block';
+        if (q) q.style.display = 'block';
     }
-
     function isRequired(item) {
         if (!item.category || !item.category.label) return false;
         return item.category.label.trim() === 'ЛДСП';
     }
-
     function traverse(node, acc) {
         if (!node || typeof node !== 'object') return;
         if (typeof node.totalHole === 'number' && isRequired(node)) acc.holes += node.totalHole;
@@ -1143,42 +1612,28 @@
         if (Array.isArray(node.children)) node.children.forEach(ch => traverse(ch, acc));
         if (Array.isArray(node.items))    node.items.forEach(ch => traverse(ch, acc));
     }
-
     function processJsonData(data) {
         if (!data) return;
-
         const acc = { holes: 0, pallets: 0 };
         traverse(data, acc);
-
         if (acc.holes > 0)   { totalSum  += acc.holes;   saveSum(); }
         if (acc.pallets > 0) { palletSum += acc.pallets; savePallet(); }
-
-        // Показываем цитату только если ждали данных от «Характеристик продукции»
         if (waitingForCharData && (acc.holes > 0 || acc.pallets > 0)) {
-            updateDisplay();
-            showQuote();
-            waitingForCharData = false;
+            updateDisplay(); showQuote(); waitingForCharData = false;
         } else if (acc.holes > 0 || acc.pallets > 0) {
             updateDisplay();
         }
     }
-
-    // === Клик по «Характеристики продукции» ===
     document.addEventListener('click', (e) => {
         const target = e.target;
         if (!target || !target.closest) return;
-
         const btn = target.closest('button, [role="button"], a, div, span, [data-slot="trigger"]');
         if (!btn) return;
-
         const text = (btn.textContent || '').trim();
         if (!text.includes('Характеристики продукции')) return;
-
         waitingForCharData = true;
-        // страховка: если данных нет 5 сек — сбрасываем флаг
         setTimeout(() => { waitingForCharData = false; }, 5000);
     }, true);
-
     const originalOpen = W.XMLHttpRequest.prototype.open;
     W.XMLHttpRequest.prototype.open = function(method, url) {
         this.addEventListener('load', function() {
@@ -1191,7 +1646,6 @@
         });
         return originalOpen.apply(this, arguments);
     };
-
     const originalFetch = W.fetch;
     W.fetch = async function(...args) {
         const response = await originalFetch.apply(this, args);
@@ -1201,10 +1655,53 @@
         }).catch(() => {});
         return response;
     };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', createQuote);
+    else createQuote();
+})();
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', createQuote);
-    } else {
-        createQuote();
-    }
+//Замена иконки
+
+(function() {
+    'use strict';
+
+    // Основа
+    const MY_ICON_URL = 'https://img.icons8.ru/?size=100&id=71367&format=png&color=000000';
+
+    // Резерв
+    const FALLBACK_SVG = encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 7V4H6l6 8-6 8h12v-3"/></svg>'
+    );
+    const FALLBACK_URL = `data:image/svg+xml;utf8,${FALLBACK_SVG}`;
+
+    const css = `
+        #e8-calc-mini{
+            position:fixed;right:20px;bottom:20px;z-index:999999;
+            width:46px;height:46px;border-radius:50%;
+            border:0;cursor:pointer;
+            box-shadow:0 4px 14px rgba(0,0,0,.5);
+            display:flex;align-items:center;justify-content:center;
+            transition:background-color .15s, transform .1s;
+            color:transparent;
+
+            /*Основа > резерв*/
+            background-color:#3b82f6;
+            background-image:
+                url('${MY_ICON_URL}'),
+                url('${FALLBACK_URL}');
+            background-repeat: no-repeat, no-repeat;
+            background-position: center center, center center;
+            background-size: 26px 26px, 22px 22px;
+        }
+
+        #e8-calc-mini:hover{
+            background-color:#2563eb;
+            transform:scale(1.05);
+        }
+
+        #e8-calc-mini.hidden{ display:none; }
+    `;
+
+    const style = document.createElement('style');
+    style.textContent = css;
+    document.head.appendChild(style);
 })();
