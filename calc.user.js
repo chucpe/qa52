@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Калькулейшин
 // @namespace    Калькулейшин
-// @version      2.79
+// @version      2.80
 // @description  Подсчёт паллет/суммы + реальное время + фильтр по датам + настройки + фиолетовые заявки + цены + статистика
 // @match        https://e8.ffa.su/*
 // @grant        GM_xmlhttpRequest
@@ -1083,8 +1083,8 @@
       </div>
       <button id="e8-calc-minimize" class="secondary">Свернуть</button>
     `;
-        // Функция для безопасной вставки
-            function safeAppend() {
+           // Функция для безопасной вставки
+    function safeAppend() {
         if (!document.body) {
             setTimeout(safeAppend, 50);
             return;
@@ -1104,12 +1104,26 @@
         }
 
         applyAdaptiveLayout();
+
+        if (settings.autoMinimize) {
+            setMinimized(true);
+        } else {
+            const savedMin = localStorage.getItem(LS_MIN_KEY) === '1';
+            setMinimized(savedMin);
+        }
     }
+              // ← Восстанавливаем свёрнутость ПОСЛЕ вставки в DOM
+        if (settings.autoMinimize) {
+            setMinimized(true);
+        } else {
+            const savedMin = localStorage.getItem(LS_MIN_KEY) === '1';
+            setMinimized(savedMin);
+        }
 
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
         setTimeout(safeAppend, 300);
     } else {
-        window.addEventListener('DOMContentLoaded', () => setTimeout(safeAppend, 300));
+        window.addEventListener('DOMContentLoaded', () => setTimeout(safeAppend, 500));
     }
 
     const datesPanel = box.querySelector('#e8-calc-dates');
@@ -1180,12 +1194,6 @@
       saveSettings();
     });
 
-    box.querySelector('#e8-automin').addEventListener('change', (e) => {
-      settings.autoMinimize = e.target.checked;
-      saveSettings();
-      log('Автосворачивание:', settings.autoMinimize);
-    });
-
     box.querySelector('#e8-settings-apply').addEventListener('click', () => {
       const rate = Number(box.querySelector('#e8-rate-input').value);
       const tax  = Number(box.querySelector('#e8-tax-input').value);
@@ -1219,14 +1227,6 @@
     box.querySelector('#e8-calc-minimize').addEventListener('click', () => setMinimized(true));
 
     box.style.opacity = settings.opacity;
-
-    if (settings.autoMinimize) {
-      setMinimized(true);
-    } else {
-      const savedMin = localStorage.getItem(LS_MIN_KEY) === '1';
-      setMinimized(savedMin);
-    }
-
     applyAdaptiveLayout();
     return box;
   }
@@ -1382,6 +1382,14 @@
 
   loadSettings();
   loadPrice().catch(e => log('Ошибка загрузки прайса:', e));
+
+    document.addEventListener('change', (e) => {
+    if (e.target && e.target.id === 'e8-automin') {
+      settings.autoMinimize = e.target.checked;
+      saveSettings();
+      log('Автосворачивание:', settings.autoMinimize);
+    }
+  });
 
   function boot() {
     ensureBox();
