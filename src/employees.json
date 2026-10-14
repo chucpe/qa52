@@ -3,7 +3,7 @@
       "number": 5147,
       "firstName": "Александр",
       "lastName": "Алманцев",
-      "machine": "kdt",
+      "workplace": "kdt",
       "comments": "",
       "workshift": ""
   },
@@ -11,7 +11,7 @@
       "number": 9609,
       "firstName": "Александр",
       "lastName": "Курбатов",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": ""
   },
@@ -19,7 +19,7 @@
       "number": 1961,
       "firstName": "Александр",
       "lastName": "Маматов",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": ""
   },
@@ -27,7 +27,7 @@
       "number": 7677,
       "firstName": "Алексей",
       "lastName": "Шеин",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": ""
   },
@@ -35,7 +35,7 @@
       "number": 7070,
       "firstName": "Алишер",
       "lastName": "Абдуллаев",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": ""
   },
@@ -43,7 +43,7 @@
       "number": 5295,
       "firstName": "Валерий",
       "lastName": "Петров",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": ""
   },
@@ -59,7 +59,7 @@
       "number": 2938,
       "firstName": "Дмитрий",
       "lastName": "Плотников",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": "",
   },
@@ -67,7 +67,7 @@
       "number": 6192,
       "firstName": "Иван",
       "lastName": "Холкин",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": ""
   },
@@ -75,7 +75,7 @@
       "number": 1368,
       "firstName": "Иван",
       "lastName": "Шувалов",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": ""
   },
@@ -83,7 +83,7 @@
       "number": 1824,
       "firstName": "Кирил",
       "lastName": "Глухов",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": ""
   },
@@ -91,7 +91,7 @@
       "number": 8960,
       "firstName": "Константин",
       "lastName": "Галеев",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": "",
   },
@@ -99,7 +99,7 @@
       "number": 5664,
       "firstName": "Николай ",
       "lastName": "Хитров",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": ""
   },
@@ -107,7 +107,7 @@
       "number": 2602,
       "firstName": "Осман",
       "lastName": "Мирзегаев",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": ""
   },
@@ -115,7 +115,7 @@
       "number": 2058,
       "firstName": "Федор",
       "lastName": "Привалихин",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": ""
   },
@@ -123,7 +123,7 @@
       "number": 4362,
       "firstName": "Руслан",
       "lastName": "Аристархов",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": ""
   },
@@ -131,7 +131,7 @@
       "number": 9942,
       "firstName": "Павел",
       "lastName": "Щеглов",
-      "machine": "",
+      "workplace": "",
       "comments": "",
       "workshift": ""
   }
