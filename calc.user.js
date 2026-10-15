@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Калькулейшн
-// @namespace    Калькулейшн
-// @version      2.81
+// @name         dev.Калькулейшин
+// @namespace    dev.Калькулейшин
+// @version      3.0
 // @description  Подсчёт паллет/суммы + реальное время + фильтр по датам + настройки + фиолетовые заявки + цены + статистика
 // @match        https://e8.ffa.su/*
 // @grant        GM_xmlhttpRequest
@@ -350,11 +350,17 @@
                 panel.style.display = 'none';
                 if (orders) orders.style.display = '';
                 btn.textContent = 'Статистика';
-            } else {
+                        } else {
                 renderStats();
                 panel.style.display = 'block';
                 if (orders) orders.style.display = 'none';
                 btn.textContent = 'Статистика ✓';
+
+                // Скрываем онлайн и его галочку
+                const onlinePanel = document.getElementById('e8-online-panel');
+                if (onlinePanel) onlinePanel.style.display = 'none';
+                const onlineBtn = document.getElementById('e8-calc-online-toggle');
+                if (onlineBtn) onlineBtn.textContent = 'Онлайн';
             }
         });
     }
@@ -999,7 +1005,7 @@
     #e8-calc-box .pal-sep{border-top:1px dashed #333;margin:4px 0}
     #e8-calc-box .unk-reason{font-size:10px;color:#ffb86c;opacity:.9}
 
-    #e8-calc-dates,#e8-calc-settings,#e8-stats-panel{display:none;margin-top:8px;padding-top:8px;border-top:1px dashed #444}
+    #e8-calc-dates,#e8-calc-settings,#e8-stats-panel,#e8-online-panel{display:none;margin-top:8px;padding-top:8px;border-top:1px dashed #444}
     #e8-stats-panel{background:#161622;border-left:2px solid #334155;border-radius:0 4px 4px 0;padding:6px 8px;font-size:12px;max-height:400px;overflow-y:auto;box-sizing:border-box}
     #e8-calc-dates label,#e8-calc-settings label{display:block;font-size:11px;opacity:.8;margin:4px 0 2px}
     #e8-calc-dates input,#e8-calc-settings input{width:100%;box-sizing:border-box;background:#0f172a;color:#eee;border:1px solid #334155;border-radius:5px;padding:4px 6px;font:12px system-ui;color-scheme:dark}
@@ -1009,6 +1015,17 @@
     #e8-calc-settings input[type=checkbox]{width:auto;margin:0}
     #e8-calc-settings .hint{font-size:10px;opacity:.6;margin-top:2px}
     #e8-calc-settings .chk{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;opacity:.9}
+    #e8-online-panel{background:#161622;border-left:2px solid #334155;border-radius:0 4px 4px 0;padding:6px 8px;font-size:11px;max-height:400px;overflow-y:auto;box-sizing:border-box}
+    #e8-online-panel table{width:100%;border-collapse:collapse;table-layout:fixed}
+    #e8-online-panel th{text-align:left;font-size:10px;opacity:.6;padding:2px 3px;border-bottom:1px solid #2a2a3e;font-weight:600}
+    #e8-online-panel td{padding:3px;vertical-align:top;border-bottom:1px solid #1e1e2e;word-wrap:break-word;overflow-wrap:break-word;font-size:11px}
+    #e8-online-panel tr:hover td{background:#1e1e2e}
+    #e8-online-panel .status-on{color:#7CFC9B;font-weight:600}
+    #e8-online-panel .status-off{color:#fbbf24}
+    #e8-online-panel .col-status{width:52px}
+    #e8-online-panel .col-name{width:38%}
+    #e8-online-panel .col-work{width:28%}
+    #e8-online-panel .col-comment{width:28%;opacity:.85}
 
     #e8-calc-mini{
       position:fixed;right:20px;bottom:20px;z-index:999999;
@@ -1103,7 +1120,7 @@
           <button id="e8-settings-reset" class="secondary">Сбросить</button>
         </div>
       </div>
-
+      <div id="e8-online-panel" style="display:none;"></div>
       <div id="e8-stats-panel" style="display:none;"></div>
       <button id="e8-calc-toggle">Считать по датам</button>
       <button id="e8-calc-recalc" class="secondary">Пересчитать</button>
@@ -1111,7 +1128,10 @@
       <button id="e8-calc-stats-toggle" class="secondary">Статистика</button>
       <button id="e8-calc-settings-toggle" class="secondary">Настройка</button>
       </div>
+      <div class="btn-row">
+      <button id="e8-calc-online-toggle" class="secondary">Онлайн</button>
       <button id="e8-calc-minimize" class="secondary">Свернуть</button>
+      </div>
     `;
            // Функция для безопасной вставки
     function safeAppend() {
@@ -1165,6 +1185,10 @@
       settingsPanel.style.display = 'none';
       const statsPanel = document.getElementById('e8-stats-panel');
       if (statsPanel) statsPanel.style.display = 'none';
+      const onlinePanel = document.getElementById('e8-online-panel');
+      if (onlinePanel) onlinePanel.style.display = 'none';
+      const onlineBtn = document.getElementById('e8-calc-online-toggle');
+      if (onlineBtn) onlineBtn.textContent = 'Онлайн';
 
       // Сбрасываем галочки у других кнопок
       const statsBtn = document.getElementById('e8-calc-stats-toggle');
@@ -1852,3 +1876,373 @@
     else if (percent < 80) el.style.color = '#fbbf24';  // жёлтый
     else el.style.color = '#ff5555';                    // красный
   }
+
+// ==================================================================
+// МОДУЛЬ «ОНЛАЙН» — кто сейчас работает
+// ==================================================================
+(function() {
+  'use strict';
+
+  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  const EMPLOYEES_URL = 'https://raw.githubusercontent.com/chucpe/qa52/refs/heads/master/src/employees.json';
+  const API_BASE = 'https://backoffice-e8.ffa.su';
+
+  let usersCache = [];
+  let currentWorkPlanId = null;
+  let employeesMap = null;
+
+  // ===== 1. Загрузка employees.json =====
+  function loadEmployees(force) {
+    return new Promise((resolve) => {
+      if (force) {
+        employeesMap = null;
+      } else if (employeesMap) {
+        resolve(employeesMap);
+        return;
+      }
+
+      const cacheBuster = '?t=' + Date.now();
+
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: EMPLOYEES_URL + cacheBuster,
+        nocache: true,
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+        },
+        onload: (res) => {
+          if (res.status !== 200) {
+            resolve(new Map());
+            return;
+          }
+          try {
+            let text = res.responseText
+              .replace(/,\s*}/g, '}')
+              .replace(/,\s*]/g, ']');
+            const arr = JSON.parse(text);
+            const map = new Map();
+            const list = Array.isArray(arr) ? arr : Object.values(arr);
+            for (const emp of list) {
+              if (!emp) continue;
+              const key = String(emp.number ?? emp.id ?? '');
+              if (!key) continue;
+              map.set(key, {
+                firstName: (emp.firstName || '').trim(),
+                lastName:  (emp.lastName  || '').trim(),
+                workplace: (emp.workplace || emp.machine || '').trim(),
+                comments:  (emp.comments  || '').trim(),
+              });
+            }
+            employeesMap = map;
+            resolve(map);
+          } catch (e) {
+            resolve(new Map());
+          }
+        },
+        onerror: () => resolve(new Map()),
+        ontimeout: () => resolve(new Map()),
+        timeout: 10000,
+      });
+    });
+  }
+
+  // ===== 2. Получение токена =====
+  function getToken() {
+    try {
+      let t = W.__e8Token || window.__e8Token;
+      if (!t) {
+        t = localStorage.getItem('auth_token');
+      }
+      if (!t) return null;
+      if (/^Bearer\s+/i.test(t)) return t;
+      if (/^eyJ/.test(t)) return 'Bearer ' + t;
+      return null;
+    } catch (e) { return null; }
+  }
+
+  // ===== 3. Прямой запрос /1/jobs?statusId=1 для получения workPlanId =====
+  function fetchWorkPlanId() {
+    return new Promise((resolve) => {
+      const token = getToken();
+      if (!token) { resolve(null); return; }
+      const url = `${API_BASE}/api/v1/admin/projects/1/jobs?statusId=1`;
+
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url,
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': token,
+        },
+        onload: (res) => {
+          if (res.status !== 200) { resolve(null); return; }
+          try {
+            const j = JSON.parse(res.responseText);
+
+            // Приоритет 1: из справочника workPlans
+            const workPlans = j?.other?.dictionary?.workPlans
+                           || j?.data?.other?.dictionary?.workPlans
+                           || [];
+            if (Array.isArray(workPlans) && workPlans.length > 0 && workPlans[0].id) {
+              resolve(workPlans[0].id);
+              return;
+            }
+
+            // Приоритет 2: рекурсивный поиск workPlanId
+            function findWpId(obj, depth) {
+              if (depth > 6 || !obj || typeof obj !== 'object') return null;
+              if (obj.workPlanId && typeof obj.workPlanId === 'string') return obj.workPlanId;
+              if (Array.isArray(obj)) {
+                for (const item of obj) {
+                  const r = findWpId(item, depth + 1);
+                  if (r) return r;
+                }
+              } else {
+                for (const k of Object.keys(obj)) {
+                  const v = obj[k];
+                  if (v && typeof v === 'object') {
+                    const r = findWpId(v, depth + 1);
+                    if (r) return r;
+                  }
+                }
+              }
+              return null;
+            }
+            resolve(findWpId(j, 0));
+          } catch (e) {
+            resolve(null);
+          }
+        },
+        onerror: () => resolve(null),
+        ontimeout: () => resolve(null),
+        timeout: 15000,
+      });
+    });
+  }
+
+  // ===== 4. Запрос одной страницы пользователей =====
+  function fetchUsersPage(workPlanId, page) {
+    return new Promise((resolve) => {
+      const token = getToken();
+      if (!token) { resolve([]); return; }
+
+      const url = `${API_BASE}/api/v1/admin/dictionary/users?page=${page}&take=20&projectId=1&workPlanId=${workPlanId}&label`;
+
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url,
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': token,
+        },
+        onload: (res) => {
+          if (res.status !== 200) { resolve([]); return; }
+          try {
+            const j = JSON.parse(res.responseText);
+            const items = j?.items || j?.data?.items || j?.data || [];
+            resolve(Array.isArray(items) ? items : []);
+          } catch (e) {
+            resolve([]);
+          }
+        },
+        onerror: () => resolve([]),
+        ontimeout: () => resolve([]),
+        timeout: 15000,
+      });
+    });
+  }
+
+  // ===== 5. Загрузка двух страниц пользователей =====
+  async function loadUsers(workPlanId) {
+    const [page1, page2] = await Promise.all([
+      fetchUsersPage(workPlanId, 1),
+      fetchUsersPage(workPlanId, 2),
+    ]);
+    usersCache = [...page1, ...page2];
+    return usersCache;
+  }
+
+  // ===== 6. Форматирование lastSeen в МСК (+3 часа) =====
+  function formatLastSeen(iso) {
+    if (!iso) return '—';
+    let s = String(iso);
+    if (!/[Zz]|[+\-]\d{2}:?\d{2}$/.test(s)) s = s + 'Z';
+    const d = new Date(s);
+    if (isNaN(d)) return '—';
+    const msk = new Date(d.getTime() + 3 * 60 * 60 * 1000);
+    const p = (x) => String(x).padStart(2, '0');
+    const day = p(msk.getUTCDate());
+    const mon = p(msk.getUTCMonth() + 1);
+    const yr = String(msk.getUTCFullYear()).slice(-2);
+    const hh = p(msk.getUTCHours());
+    const mm = p(msk.getUTCMinutes());
+    return `${hh}:${mm} ${day}.${mon}.${yr}`;
+  }
+
+  function escapeHtmlOnline(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+
+  // ===== 7. Рендер таблицы =====
+  function renderOnlineTable() {
+    const panel = document.getElementById('e8-online-panel');
+    if (!panel) return;
+
+    if (usersCache.length === 0) {
+      panel.innerHTML = '<div style="font-size:11px;opacity:.6;padding:6px;">Нет данных</div>';
+      return;
+    }
+
+    const map = employeesMap || new Map();
+
+    const rows = usersCache
+      .filter((u) => {
+        const empKey = String(u.number ?? u.id ?? '');
+        return map.has(empKey);
+      })
+      .map((u) => {
+        const empKey = String(u.number ?? u.id ?? '');
+        const emp = map.get(empKey) || {};
+
+        const firstName = (emp.firstName || u.firstName || '').trim();
+        const lastName  = (emp.lastName  || u.lastName  || '').trim();
+        const fio = [lastName, firstName].filter(Boolean).join(' ') || 'Неизвестный';
+
+        const workplaceRaw = (emp.workplace || '').trim();
+        const workplaceHtml = workplaceRaw
+          ? escapeHtmlOnline(workplaceRaw)
+          : '<span style="font-size:10px;color:#888;font-style:italic;">Не назначено</span>';
+
+        const comments  = (emp.comments  || '').trim();
+
+        const status = String(u.status || '').toUpperCase();
+        const isOnline = status === 'ONLINE';
+
+        let statusHtml;
+        let lastSeenMs = 0;
+        if (isOnline) {
+          statusHtml = '<span class="status-on">В сети</span>';
+        } else {
+          statusHtml = `<span class="status-off">${formatLastSeen(u.lastSeen)}</span>`;
+          if (u.lastSeen) {
+            const s = String(u.lastSeen);
+            const d = new Date(/[Zz]|[+\-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z');
+            if (!isNaN(d)) lastSeenMs = d.getTime();
+          }
+        }
+
+        return { fio, statusHtml, workplace: workplaceHtml, comments, isOnline, lastSeenMs };
+      });
+
+    rows.sort((a, b) => {
+      if (a.isOnline !== b.isOnline) {
+        return a.isOnline ? -1 : 1;
+      }
+      if (a.isOnline) {
+        return a.fio.localeCompare(b.fio, 'ru');
+      }
+      return (b.lastSeenMs || 0) - (a.lastSeenMs || 0);
+    });
+
+    let html = `
+      <table>
+        <thead>
+          <tr>
+            <th class="col-status">Статус</th>
+            <th class="col-name">Работник</th>
+            <th class="col-work">Рабочее место</th>
+            <th class="col-comment">Комментарий</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+
+    for (const r of rows) {
+      html += `
+        <tr>
+          <td class="col-status">${r.statusHtml}</td>
+          <td class="col-name">${escapeHtmlOnline(r.fio)}</td>
+          <td class="col-work">${r.workplace}</td>
+          <td class="col-comment">${escapeHtmlOnline(r.comments)}</td>
+        </tr>
+      `;
+    }
+
+    html += `</tbody></table>`;
+    panel.innerHTML = html;
+  }
+
+  // ===== 8. Полное обновление =====
+  async function refreshOnline() {
+    await loadEmployees(true);
+    if (!currentWorkPlanId) {
+      currentWorkPlanId = await fetchWorkPlanId();
+    }
+    if (currentWorkPlanId) {
+      await loadUsers(currentWorkPlanId);
+    }
+    renderOnlineTable();
+  }
+
+  // ===== 9. Кнопка «Онлайн» =====
+  function attachOnlineButton() {
+    const btn = document.getElementById('e8-calc-online-toggle');
+    if (!btn || btn.dataset.e8OnlineBound === '1') return;
+    btn.dataset.e8OnlineBound = '1';
+
+    btn.addEventListener('click', async () => {
+      const panel = document.getElementById('e8-online-panel');
+      const statsPanel = document.getElementById('e8-stats-panel');
+      const datesPanel = document.getElementById('e8-calc-dates');
+      const settingsPanel = document.getElementById('e8-calc-settings');
+
+      if (!panel) return;
+
+      const visible = panel.style.display === 'block';
+
+      const statsBtn = document.getElementById('e8-calc-stats-toggle');
+      if (statsBtn) statsBtn.textContent = 'Статистика';
+      const settingsBtn = document.getElementById('e8-calc-settings-toggle');
+      if (settingsBtn) settingsBtn.textContent = 'Настройка';
+      const datesBtn = document.getElementById('e8-calc-toggle');
+      if (datesBtn) datesBtn.textContent = 'Считать по датам';
+
+      if (visible) {
+        panel.style.display = 'none';
+        btn.textContent = 'Онлайн';
+        return;
+      }
+
+      if (statsPanel) statsPanel.style.display = 'none';
+      if (datesPanel) datesPanel.style.display = 'none';
+      if (settingsPanel) settingsPanel.style.display = 'none';
+
+      panel.style.display = 'block';
+      btn.textContent = 'Онлайн ✓';
+      panel.innerHTML = '<div style="font-size:11px;opacity:.6;padding:6px;">Загрузка…</div>';
+
+      try {
+        await refreshOnline();
+      } catch (e) {
+        panel.innerHTML = '<div style="font-size:11px;color:#ff5555;padding:6px;">Ошибка загрузки</div>';
+      }
+    });
+  }
+
+  setInterval(attachOnlineButton, 1000);
+  attachOnlineButton();
+
+  // ===== 10. Автоподготовка при старте =====
+  setTimeout(async () => {
+    await loadEmployees(true);
+    if (!currentWorkPlanId) {
+      currentWorkPlanId = await fetchWorkPlanId();
+    }
+  }, 2000);
+
+  window.__e8OnlineRefresh = refreshOnline;
+})();
