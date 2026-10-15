@@ -19,7 +19,7 @@
       "number": 1961,
       "firstName": "Александр",
       "lastName": "Маматов",
-      "workplace": "huahua",
+      "workplace": "nihuahua",
       "comments": "",
       "workshift": ""
   },
@@ -27,7 +27,7 @@
       "number": 7677,
       "firstName": "Алексей",
       "lastName": "Шеин",
-      "workplace": "",
+      "workplace": "huahua",
       "comments": "",
       "workshift": ""
   },
@@ -35,7 +35,7 @@
       "number": 7070,
       "firstName": "Алишер",
       "lastName": "Абдуллаев",
-      "workplace": "",
+      "workplace": "2kdt",
       "comments": "",
       "workshift": ""
   },
@@ -59,8 +59,8 @@
       "number": 2938,
       "firstName": "Дмитрий",
       "lastName": "Плотников",
-      "workplace": "",
-      "comments": "",
+      "workplace": "huahua",
+      "comments": "в отпуске до ",
       "workshift": ""
   },
   { 
@@ -75,7 +75,7 @@
       "number": 1368,
       "firstName": "Иван",
       "lastName": "Шувалов",
-      "workplace": "",
+      "workplace": "beaver1",
       "comments": "",
       "workshift": ""
   },
@@ -99,7 +99,7 @@
       "number": 5664,
       "firstName": "Николай ",
       "lastName": "Хитров",
-      "workplace": "",
+      "workplace": "beaver2",
       "comments": "",
       "workshift": ""
   },
@@ -107,7 +107,7 @@
       "number": 2602,
       "firstName": "Осман",
       "lastName": "Мирзегаев",
-      "workplace": "",
+      "workplace": ",kdt",
       "comments": "",
       "workshift": ""
   },
@@ -115,7 +115,7 @@
       "number": 2058,
       "firstName": "Федор",
       "lastName": "Привалихин",
-      "workplace": "",
+      "workplace": "2kdt",
       "comments": "",
       "workshift": ""
   },
